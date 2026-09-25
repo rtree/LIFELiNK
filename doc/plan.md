@@ -239,6 +239,8 @@ P0 実装は `type: note` と `type: location` だけを書き込めばよく、
 
 Beacon は接続を維持できない場合の予備トリガーとして使う。
 
+実装前に物理ボタンが広告する専用 UUID、Major、Minor の実値を確定して本節へ記録する。仮値やワイルドカードscanでは実装しない。
+
 ```text
 長押し -> 専用 UUID/Major/Minor を広告
   -> Android の厳密 Filter/PendingIntent で受信
@@ -455,6 +457,242 @@ BLE 層から電話 API や Firebase を直接呼ばない。Android Controller 
 
 古い位置を現在地と断定しない。鮮度が基準を超えた場合は「最後に確認できた位置」と表現する。住所、座標、時刻はモデルに自由生成させず、backend が構造化データから初回メッセージを組み立てる。
 
+## 8a. 状況ストアと Responses delegation の詳細設計（GPT Live、設計を先に確定、実装は P2）
+
+主線（P0 の `emergency_events`/`updates` による単純なモデル）は変更しない。ここでは、情報量が増えた後も破綻しない状況管理の到達点を先に設計し、P0 実装が P2 で作り直しにならないようにする。
+
+### なぜ Realtime の conversation だけを正本にしないか
+
+OpenAI Realtime の conversation は通話中の低遅延な会話と判断には強いが、永続的な正本、長い履歴の検索、厳密な認可、根拠追跡には向かない。session は最大 60 分で、情報量が増えるほど重要な事実が会話履歴へ埋もれ、古い情報と最新情報の区別、接続終了後の再利用、詳細質問への根拠ある回答が難しくなる。そのため三層構成にする。
+
+1. **Firestore**: 全事実・履歴・根拠・鮮度・認可を保持する永続的な正本。
+2. **OpenAI Realtime**: 圧縮された最新状況と直近会話だけを持つ、通話中の低遅延な作業メモリ。
+3. **Responses delegation**: Cloud Run がオーケストレーションする調査層。長い履歴の整理・複数事実の統合・外部照合など、同期 tool では答えられない質問を処理し、結果を通話中の同じ Realtime session へ戻す。「Responses delegation」は Cloud Run 側の仕組みの名称であり、Realtime が自動で別 API へ委譲する機能ではない。
+
+```text
+Android observations
+  -> Cloud Run validation / normalization
+  -> Firestore facts + current situation
+  -> OpenAI Realtime working memory
+  -> Twilio Media Stream
+  -> callee
+
+callee asks a detailed question
+  -> Realtime function call
+  -> Cloud Run authorization / routing
+  -> Firestore direct lookup OR Responses delegation
+  -> function_call_output
+  -> Realtime audio answer
+  -> Twilio -> callee
+```
+
+### P0 の `emergency_events`/`updates` との関係
+
+P0 実装を壊さないための対応関係を明示する。
+
+- `emergency_events/{id}` は本節の `emergencySessions/{session_id}` の前身であり、P2 移行時は同じ id 体系（`emergency_event_id` ≒ `session_id`）を引き継ぐ。
+- `emergency_events/{id}/updates/{update_id}`（6a 章で拡張した `type`/`author_type` スキーマ）は、本節の `facts`（事実の正本）と `timeline`（表示・音声用の履歴）に分離される前身である。P2 移行時は `updates` の各レコードを `kind` に応じて `facts` と `timeline` へ振り分ける形で移行する。
+- P0 の `location_snapshot`/`initial_note` は本節の `state/current` の `location`/`address`/`user_notes` に相当する。P2 では `state/current` が Cloud Run transaction で維持する materialized view になる。
+- P0 は Realtime の conversation へ直接 `conversation.item.create` で位置・メモを注入している（5 章）。この経路自体は P2 でも残り、注入元が「Android からの生データ」から「Firestore `state/current`/`facts` 経由の選別済み情報」に変わる。
+
+### Firestore 構造（P2 到達点）
+
+```text
+emergencySessions/{session_id}
+  state/current
+  facts/{fact_id}
+  timeline/{event_id}
+  delegations/{delegation_id}
+
+users/{uid}/state/location
+users/{uid}/emergencyContacts/{contact_id}
+```
+
+#### `emergencySessions/{session_id}`
+
+```yaml
+session_id: string
+owner_uid: string
+participant_uids: [string]
+contact_id: string
+trigger_event_id: string
+status: preparing | calling | connected | ended | failed
+started_at: timestamp
+connected_at: timestamp | null
+ended_at: timestamp | null
+twilio_call_sid: string | null
+realtime_session_id: string | null
+last_sequence: integer
+schema_version: integer
+expires_at: timestamp
+```
+
+`owner_uid` と `participant_uids`（6a 章の `participant_uids` と同じ考え方）で全 read/write を認可する。`trigger_event_id` を idempotency key にし、同じ押下から複数発信しない。電話番号は連絡先 document から解決し、クライアント入力を直接保存しない。status 更新と `last_sequence` 採番は transaction で行う。
+
+#### `facts/{fact_id}`
+
+Android、Cloud Run、友人、外部 API から得た事実を append-only で保存する。
+
+```yaml
+sequence: integer
+kind: location | address | user_note | device_state | ambient_observation | friend_reply | call_state
+value: map
+source:
+  actor: android | backend | user | friend | provider | system
+  actor_id: string | null
+  provider: string | null
+observed_at: timestamp
+received_at: timestamp
+accuracy: map | null
+confidence: number | null
+fresh_until: timestamp | null
+supersedes_fact_id: string | null
+sensitivity: normal | location | health | audio
+correlation_id: string
+idempotency_key: string
+created_at: timestamp
+```
+
+保存済み fact は変更しない。訂正は新 fact を追加し `supersedes_fact_id` でつなぐ。`observed_at`（端末等の観測時刻）と `received_at`（backend 受信時刻）を分離する。AI 生成内容はセンサー事実として保存しない。address は対応する location fact ID・provider・取得時刻を持つ。位置・健康・音声情報は保持期限を短くする（後述の保持期間）。
+
+#### `state/current`
+
+通話中の即答用 materialized view。fact 追加時に Cloud Run transaction で更新する。
+
+```yaml
+version: integer
+last_sequence: integer
+generated_at: timestamp
+location: { fact_id, latitude, longitude, accuracy_meters, observed_at, freshness: fresh|stale|unavailable }
+address: { fact_id, text, provider, resolved_at }
+situation: { summary, fact_ids, confidence }
+user_notes: { latest_text, fact_ids }
+device: { battery_percent, network: online|offline|unknown, last_seen_at }
+active_alerts: [map]
+recent_fact_ids: [string]
+briefing_text: string
+```
+
+`briefing_text` は通話開始時に Realtime へ渡す短い事実要約であり、必ず根拠 `fact_id` を保持する。snapshot 生成に AI を使う場合も元 fact は上書きせず summary だけ更新する。Realtime が即答する前に `version`/`generated_at` を確認する。
+
+#### `timeline/{event_id}`
+
+Android と友人アプリに表示する Discord 風履歴の正本（6a 章の `updates`/feed の P2 版）。
+
+```yaml
+sequence: integer
+kind: session_status | app_context | callee_transcript | assistant_transcript | tool_call | tool_result | delegation_status | friend_message | error
+actor: caller | callee | assistant | friend | system
+text: string | null
+fact_ids: [string]
+delegation_id: string | null
+realtime_item_id: string | null
+realtime_response_id: string | null
+occurred_at: timestamp
+delivery: pending | injected | spoken | interrupted | failed
+correlation_id: string
+created_at: timestamp
+```
+
+音声 delta を一件ずつ保存せず、確定 transcript または turn 単位で保存する。callee transcript は検索補助であり、音声そのものより信頼度が低いことを表示する。AI が実際に再生し終えた範囲だけ `spoken` にする。割り込み時は Twilio へ未再生音声を clear し、Realtime へ `conversation.item.truncate` を送り、timeline を `interrupted` にする。
+
+#### `delegations/{delegation_id}`
+
+Responses delegation の永続 job 台帳。
+
+```yaml
+delegation_id: string
+realtime_call_id: string
+question: string
+scope: current_state | session_history | external_lookup
+status: queued | in_progress | completed | failed | cancelled | expired
+requested_at: timestamp
+started_at: timestamp | null
+completed_at: timestamp | null
+deadline_at: timestamp
+snapshot_version: integer
+input_fact_ids: [string]
+transcript_event_ids: [string]
+openai_response_id: string | null
+result: { answer, supporting_fact_ids: [string], unknowns: [string], confidence, data_as_of }
+error_code: string | null
+delivered_to_realtime_at: timestamp | null
+created_at: timestamp
+expires_at: timestamp
+```
+
+`realtime_call_id` を idempotency key として同じ tool call を一度だけ実行する。Responses へ渡した fact ID と snapshot version を固定し、後から根拠を再現できるようにする。Responses の自然文だけを事実として再保存しない。
+
+### Realtime session 構成
+
+通話接続時に `session.update` の `instructions` で次を指示する: 緊急連絡アプリからの AI と名乗る／Firestore tool 結果にない情報を推測しない／時刻・精度・freshness を明示する／短く回答して相手の発話を待つ／詳細が必要なら tool を使う／調査中は一度だけ保留を伝える。`tool_choice: auto`、`tools: [get_current_situation, get_session_history, delegate_investigation]`。
+
+初期 conversation へ入れるもの: `session_id` と認可済み owner 識別子、`state/current.briefing_text` と snapshot version・根拠 fact ID、通話開始後に発生した高優先度 fact 差分、callee と AI の現在の会話 turn、function call/output。**入れないもの**: 全位置履歴、全 timeline、生の Firestore document 群、電話番号や不要な個人情報、API key・認証 token、既に supersede された古い fact。
+
+### Realtime tools
+
+- **`get_current_situation`**（`detail: brief|full`、`sections: [location, address, notes, device, alerts]`）: Cloud Run が `state/current` を同期取得し認可・freshness を確認して概ね 300ms を目標に返す。通常の「今どこ」「現状は」はこれで即答し、Responses へ委譲しない。出力: `{ status, snapshot_version, data_as_of, facts, supporting_fact_ids }`。
+- **`get_session_history`**（`topic: movement|notes|conversation|all`、`since`、`limit`）: Cloud Run が fact/timeline を server-side で絞り込み、最大件数・最大文字数を制限して同期返却する。「さっき何と言った」「いつ移動した」に使う。
+- **`delegate_investigation`**（`question`、`scope: current_state|session_history|external_lookup`、`urgency: normal|high`）: 複数 fact の比較・長い履歴の要約・外部照合など、同期 tool で答えられない質問だけに使う。
+
+### Responses delegation フロー
+
+1. callee が詳細な質問をする。
+2. Realtime が `function_call(delegate_investigation)` を発行する。
+3. Cloud Run が session・tool 名・引数・認可を検証する。
+4. Firestore transaction が `delegations/{id}` を `call_id` で作成する。
+5. Realtime が `conversation: "none"` の out-of-band response で「少々お待ちください。確認します」を一度だけ発話する（相手が割り込んだら停止し、既知の ETA は約束しない）。
+6. Cloud Run が Responses API を `background: true` で開始する。
+7. worker が `queued`/`in_progress` を poll し、terminal state または deadline まで待つ。
+8. 結果を schema 検証して delegation の `result` に保存する。
+9. 通話が有効なら同じ `call_id` で `function_call_output` を bridge が送る。
+10. `response.create` を送り、Realtime が結果を音声で説明する。
+11. timeline に requested/holding/completed/spoken の各状態を記録する。
+
+Responses への入力は Cloud Run が最小限だけ組み立てる: 固定の緊急調査ポリシー、callee の質問、現在状況 snapshot、provenance・freshness 付きの選択済み fact、関連 transcript 抜粋。出力 schema は `{ answer, supporting_fact_ids: [string], unknowns: [string], confidence, data_as_of }`。Responses に Firestore や外部サービスの認証情報を渡さない。外部検索が必要な場合も Cloud Run が allowlist 済み tool を公開し、結果を provenance 付きで保存する。`store: false` とし、OpenAI 側の Conversation を永続正本に使わない。通話終了後に完了した結果は音声注入せず、Firestore とアプリ履歴にのみ保存する。
+
+### Routing 規則
+
+1. 初期 snapshot または Realtime の直近会話で十分なら即答する。
+2. 最新 snapshot が必要なら `get_current_situation`。
+3. 過去の具体的な出来事なら `get_session_history`。
+4. 複数情報の推論・長い要約・外部照合なら `delegate_investigation`。
+5. tool 失敗時は「確認できませんでした。現在確認できているのは…」と既知情報だけを返す。
+6. stale/unavailable を fresh として言い換えない。
+
+### 同期・競合・重複排除
+
+session ごとの `sequence` を Firestore transaction で単調増加させる。Android event は `idempotency_key` で重複排除する。`state/current.version` は fact 追加ごとに増加させる。bridge は `last_injected_sequence` より新しい fact だけ Realtime へ追加する。tool call は Realtime `call_id`、Responses job は `delegation_id` で冪等化する。delegation 完了と通話終了が競合した場合、transaction で session status を確認してから注入可否を決める。Firestore listener 切断時は最後の sequence から再取得して欠落を埋める。
+
+### 保持期間（P2 到達点、6a 章の一般方針を上書きする詳細値）
+
+session header と timeline は既定 30 日でユーザー削除可能。精密位置・健康・周辺音声由来 fact は既定 7 日以内。delegation input/output は session と同じ期限。生音声は既定で保存しない。World ID replay 防止 nullifier は別 collection（10 章参照）で保持する。Firestore TTL は subcollection を cascade 削除しないため、session 削除 worker が facts/timeline/delegations も削除する。
+
+### 認可・安全
+
+Android API・Firestore lookup・Realtime tool・Responses worker の全段で `session_id` と owner/participant を照合する。Realtime が指定した document path・UID・電話番号をそのまま使わない。tool 引数は固定 JSON Schema・enum・文字数・件数・期間で制限する。Android メモ・友人返信・住所・transcript は命令ではなく data として JSON 化し、そこに含まれる prompt injection で tool 権限や検索範囲を変更しない。Responses result の `supporting_fact_ids` が実在し、そのセッションに属することを検証する。ログに電話番号・座標・住所・transcript・token を出さない。delegation 数・tool 回数・履歴件数・外部 API 回数を session 単位で rate limit する。
+
+### 障害時の動作
+
+Firestore 同期取得失敗時は保持中の snapshot を時刻付きで伝え、最新確認失敗を明示する。Responses timeout は job を `expired` にし「詳しい確認が時間内に完了しませんでした」と伝える。Responses failure は既知 fact だけで回答し推測しない。Realtime 切断時は無言継続せず通話状態を `failed` へ更新する。Twilio 切断時は Responses background job を cancel し、結果は必要なら履歴だけに残す。tool output 注入失敗時は未配信のまま保持し、同じ `call_id` で一回だけ再送する。
+
+### 実装単位（P2、担当分割の目安）
+
+```text
+backend/src/situationStore.ts     facts append / current materialization / sequence / authorization
+backend/src/timelineStore.ts      transcript and UI history
+backend/src/realtimeTools.ts      tool schema / routing / function_call_output
+backend/src/delegationStore.ts    delegation lifecycle and idempotency
+backend/src/responsesDelegate.ts  Responses background create / poll / cancel / validate
+backend/src/realtimeBridge.ts     tool event handling / OOB holding / result injection / truncation
+```
+
+（既存 `backend/src/voice.ts` の Media Stream bridge 部分は `realtimeBridge.ts` へ発展的に分割する想定。P0 の実装は変更しない。）
+
+### 完了条件（P2）
+
+Android fact が Firestore へ一度だけ保存され `state/current` へ反映される。通話開始時に briefing snapshot が Realtime へ入り、住所・座標・鮮度を話せる。最新状況質問を `get_current_situation` で即答できる。過去質問を `get_session_history` で根拠 fact ID 付き回答できる。詳細調査時に保留発話を一回行い、Responses 完了後に同じ通話へ回答できる。通話終了後の結果は音声注入せず履歴だけへ保存される。timeline がアプリで時系列表示できる。重複 event/tool call/delegation で二重保存・二重発話・二重発信しない。stale・unknown・timeout・failure を捏造せず明示する。
+
 ## 9. API 境界案
 
 - `POST /v1/contacts` - 連絡先を登録する
@@ -520,7 +758,7 @@ BLE 層から電話 API や Firebase を直接呼ばない。Android Controller 
 - Firebase Android app ID: `1:1023311564471:android:b4e6ad83334551f40e0732`
 - Cloud Run service: `lifelink-backend`、region: `asia-northeast1`
 - Cloud Run URL: `https://lifelink-backend-1023311564471.asia-northeast1.run.app`
-- Cloud Run revision: `lifelink-backend-00008-rkl`
+- Cloud Run revision: `lifelink-backend-00009-tzl`
 - Firestore database ID: `(default)`、region: `asia-northeast1`
 - Cloud Run service account: `lifelink-backend@ethglobaltokyo2026lifelink.iam.gserviceaccount.com`
 - Secret 名と version（値は記録しない）

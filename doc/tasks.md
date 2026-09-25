@@ -33,6 +33,7 @@
 | --- | --- | --- | --- | --- |
 | P0.5-01 | DONE | 友人共有・Discord 風フィード・OpenAI Realtime 注入を前提にしたデータモデル（`friend_links`、`emergency_events.participant_uids`、`updates` の拡張スキーマ）と UI 画面遷移を確定する | なし | 決定を `doc/plan.md` の 4 章・6a 章・5 章・9 章に反映済み。P0-13 は拡張スキーマの `note`/`location` サブセットのみ実装すればよく、P1 で作り直しが不要 |
 | P0.5-02 | DONE | `firestore.rules`/`firestore.indexes.json` を実プロジェクトへデプロイする | P0.5-01、P0-03 | 2026-09-26: `firebase deploy --only firestore:rules,firestore:indexes` を実行。それまで release が 0 件（default rules のまま）だったことを Firebase Rules API で確認した上でデプロイし、`projects/.../releases/cloud.firestore` が有効化されたことを確認済み |
+| P0.5-03 | DONE | GPT Live 状況ストア（Firestore 正本 / Realtime 作業メモリ / Responses delegation の三層構成）のデータ構造と役割分担を確定する | P0.5-01 | 決定を `doc/plan.md` 8a 章に反映済み。`emergencySessions`/`facts`/`state/current`/`timeline`/`delegations` のスキーマと、P0 の `emergency_events`/`updates` との対応関係（8a 章「P0 の emergency_events/updates との関係」）を明記し、P0 実装への変更は不要 |
 
 注記: P0-13（通話中メモ・位置更新）を実装する際は、`updates` ドキュメントのフィールド名を `doc/plan.md` 6a 章の拡張スキーマ（`type`、`author_type`、`author_uid` などを含む）に合わせること。P1 での friend_comment / transcript 追加時にフィールド追加のみで済ませるため。
 
@@ -54,6 +55,19 @@
 | P1-13 | TODO | `firmware`: `firmware/xiao_gatt_button/` に address 方針、advertising 再開、Notify/ACK、event identity を実装する | P1-08、host のツールチェーン（`doc/host-setup.md`） | 6b/6c 章のプロトコル（17/16 byte, big-endian, epoch/eventId 単調増加）を満たす |
 | P1-14 | TODO | `device-test`: adb ハーネスとログ収集で 6c 章の実機試験 matrix・シナリオ・合格指標を実施する | P1-09〜P1-13 | `READY` 時間率・押下受信率・再接続時間が観測値として記録され、初期合格案を満たすか判定できる |
 | P1-15 | TODO | GATT 経路を `trigger_source: gatt` として Safety gate へ接続し、Beacon へのフォールバックを実装する | P1-09〜P1-14 | `CONNECTED -> SUBSCRIBED -> READY` を維持し、長押し一回が Notify 一回・受信一回・ACK 一回になる。GATT 不通時は Beacon 経路にフォールバックする |
+
+## P2: GPT Live 状況ストアと Responses delegation
+
+`doc/plan.md` 8a 章の設計に対応する実装タスク。P0/P1 の実通話・友人共有が安定してから着手する。
+
+| ID | 状態 | タスク | 依存 | 完了条件 |
+| --- | --- | --- | --- | --- |
+| P2-01 | TODO | `situationStore.ts`: `facts` の append・`state/current` の materialization・`sequence` 採番・認可を実装する | P0-15、P1-03 | Android fact が一度だけ保存され、`state/current` の `version` が単調増加する |
+| P2-02 | TODO | `timelineStore.ts`: `timeline` への transcript/UI 履歴書き込みを実装する（8a 章の `delivery` 状態遷移を含む） | P2-01 | 割り込み時に `conversation.item.truncate` と連動して `interrupted` が記録される |
+| P2-03 | TODO | `realtimeTools.ts`: `get_current_situation`/`get_session_history` の同期 tool と routing 規則を実装する | P2-01、P2-02 | 「今どこ」「さっき何と言ったか」に根拠 `fact_id` 付きで即答できる |
+| P2-04 | TODO | `delegationStore.ts` + `responsesDelegate.ts`: `delegate_investigation` の非同期委譲（`background: true`、poll、`call_id` 冪等化）を実装する | P2-03 | 保留発話が一回だけ発話され、Responses 完了後に同じ通話へ結果が音声で返る |
+| P2-05 | TODO | `realtimeBridge.ts`: 既存 `voice.ts` の Media Stream bridge を tool event 処理・OOB 保留・結果注入・truncation 込みで発展させる | P2-01〜P2-04 | 通話終了後の delegation 結果は音声注入されず履歴のみに保存される |
+| P2-06 | TODO | 認可・rate limit・ログ非記録の横断実装（8a 章「認可・安全」）と障害時のフォールバック文言を実装する | P2-01〜P2-05 | stale/unknown/timeout/failure を捏造せず明示し、重複 event/tool call/delegation で二重発話・二重発信しない |
 
 ## 次のアクション
 
