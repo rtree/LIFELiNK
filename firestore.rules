@@ -67,5 +67,51 @@ service cloud.firestore {
         allow write: if false;
       }
     }
+
+    // emergencySessions/{session_id} — P2 target schema, doc/plan.md 8a.
+    // Not yet written by backend; rules added ahead of implementation so the
+    // collection is never accidentally left on open/default rules.
+    match /emergencySessions/{sessionId} {
+      allow read: if isSignedIn() &&
+        (request.auth.uid == resource.data.owner_uid ||
+         request.auth.uid in resource.data.participant_uids);
+      allow write: if false;
+
+      function canReadSession() {
+        return isSignedIn() &&
+          (request.auth.uid == get(/databases/$(database)/documents/emergencySessions/$(sessionId)).data.owner_uid ||
+           request.auth.uid in get(/databases/$(database)/documents/emergencySessions/$(sessionId)).data.participant_uids);
+      }
+
+      // emergencySessions/{session_id}/state/current
+      match /state/{stateId} {
+        allow read: if canReadSession();
+        allow write: if false;
+      }
+
+      // emergencySessions/{session_id}/facts/{fact_id}
+      match /facts/{factId} {
+        allow read: if canReadSession();
+        allow write: if false;
+      }
+
+      // emergencySessions/{session_id}/timeline/{event_id}
+      match /timeline/{eventId} {
+        allow read: if canReadSession();
+        allow write: if false;
+      }
+
+      // emergencySessions/{session_id}/delegations/{delegation_id}
+      match /delegations/{delegationId} {
+        allow read: if canReadSession();
+        allow write: if false;
+      }
+    }
+
+    // world_id_nullifiers/{action}_{nullifier} — replay-protection ledger.
+    // Written only by backend (Admin SDK via `.create()`); never client-readable.
+    match /world_id_nullifiers/{nullifierId} {
+      allow read, write: if false;
+    }
   }
 }
