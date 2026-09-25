@@ -43,13 +43,13 @@
 
 | ID | 状態 | タスク | 依存 | 完了条件 |
 | --- | --- | --- | --- | --- |
-| P1-01 | TODO | フル UI モックの未決 3 論点（`doc/plan.md` 4a 章）を人間と確定する: (1) 「警察へ自動通報する」文言・実装範囲、(2) 通話録音・書き起こしを友人へ共有するか、(3) 友人共有 UI をアプリ内自作（Option A）にするか実 Discord bot（Option B）にするか | P0-15 | 決定を `doc/plan.md` 4a・12・13 章に反映済み。P1-02〜P1-06 は決定後の方式に合わせて着手する |
+| P1-01 | TODO | フル UI モックの残る未決 2 論点（`doc/plan.md` 4a 章、論点 1（警察自動通報の文言）は 2026-09-26 に人間が「登録済み緊急連絡先に限定し、警察を目標にしない」と決定済み）を確定する: (1) 通話録音・書き起こしを友人へ共有するか、(2) 友人共有 UI をアプリ内自作（Option A）にするか実 Discord bot（Option B）にするか | P0-15 | 決定を `doc/plan.md` 4a 章に反映済み。P1-02〜P1-06 は決定後の方式に合わせて着手する |
 | P1-02 | TODO | `friend_links` コレクションと招待コード発行・承認 API（`/v1/friends/*`）を実装する（P1-01 で Option A を選んだ場合） | P0-15、P0.5-01、P1-01 | 相互承認済みの友人一覧が取得でき、`pending`/`accepted`/`blocked` を切り替えられる |
 | P1-03 | TODO | `emergency_events.participant_uids` のスナップショット生成と Firestore security rules を実装する | P1-02 | イベント作成時点の友人だけが該当イベントを読み取れ、後から友人になった uid はアクセスできないことを確認 |
 | P1-04 | TODO | `updates` フィードへ `friend_comment`・`transcript_contact`・`transcript_ai` を書き込む処理を実装する（入力音声 transcription 有効化を含む） | P1-03、P0-11 | 通話中の両者の発話と友人コメントが同一フィードに時系列で保存される |
 | P1-05 | TODO | 友人コメントを `conversation.item.create` + `response.create` で進行中の Realtime セッションへ注入する | P1-04 | 通話を切らずに友人コメントの内容が相手へ音声で伝わる |
 | P1-06 | TODO | 友人共有 UI を実装する（Option A: アプリ内 Discord 風画面 / Option B: 実 Discord bot 連携。P1-01 の決定に従う） | P1-01、P1-02〜P1-05（Option A）または Discord bot 基盤構築（Option B） | 自分と共有されたイベントを時系列表示し、通話中にコメント投稿できる。Option B の場合はアプリ未インストールの友人が Discord だけで受信・返信できる |
-| P1-06a | TODO | `users/{uid}` へ `nickname`/`area` フィールドを追加し、プロフィール設定画面（モック 1-5）を実装する | P0-15 | ニックネームとエリアを保存・再取得でき、エリアを最寄り警察署解決（3-6）や住所表示に利用できる |
+| P1-06a | TODO | `users/{uid}` へ `nickname`/`area` フィールドを追加し、プロフィール設定画面（モック 1-5）を実装する | P0-15 | ニックネームとエリアを保存・再取得でき、エリアを住所表示や連絡先の文脈情報に利用できる |
 | P1-06b | TODO | 端末ローカルの 2 段階音声アナウンス（送信時 stage1・接続時 stage2、JP/EN/両方、Silent SOS トグル）を実装する | P0-09、P0-13（`in-progress`/`answered` を判定する Twilio status） | 送信直後に stage1 が即時発話され、Twilio status が `answered`/`in-progress` を報告した時だけ stage2 が発話される。Silent SOS 有効時は両方無音になる |
 | P1-07 | TODO | Android 周辺音声の扱いを設計・実装する | P0-15、同意・法務判断 | 明示同意と状態表示のもとで音声を通話へ追加可能 |
 | P1-08 | TODO | GATT 統合前の決定事項（`doc/plan.md` 13 章）を人間と確定する（minSdk/対象 Samsung 機種、firmware MAC 方式、Beacon 広告への event identity 同居可否、location FGS 採用有無、Companion Device/battery optimization の Play policy 方針、2 時間後の停止方針） | P0-15 完了（Beacon 完動） | 決定を `doc/plan.md` 6c 章・13 章に反映済み |
