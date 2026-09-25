@@ -61,6 +61,15 @@ const contactSchema = z.object({
   phone: z.string().regex(/^\+[1-9]\d{7,14}$/, "phone must use E.164 format"),
 });
 
+const locationSchema = z.object({
+  latitude: z.number().min(-90).max(90),
+  longitude: z.number().min(-180).max(180),
+  accuracy_m: z.number().nonnegative(),
+  captured_at: z.iso.datetime(),
+  address: z.string().trim().max(500).nullable(),
+  geocoded_at: z.iso.datetime().nullable(),
+});
+
 const emergencyEventSchema = z.object({
   emergency_event_id: z.uuid(),
   contact_id: z.string().min(1).max(128),
@@ -120,6 +129,32 @@ app.post(
       name: parsed.data.name,
       phone_masked: `***${parsed.data.phone.slice(-4)}`,
     });
+  },
+);
+
+app.post(
+  "/v1/locations",
+  { preHandler: authenticate },
+  async (request, reply) => {
+    const parsed = locationSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: "invalid_location",
+        details: z.flattenError(parsed.error),
+      });
+    }
+
+    const locationRef = db
+      .collection("users")
+      .doc(request.user.uid)
+      .collection("locations")
+      .doc();
+    await locationRef.set({
+      ...parsed.data,
+      created_at: FieldValue.serverTimestamp(),
+    });
+
+    return reply.code(201).send({ location_id: locationRef.id });
   },
 );
 

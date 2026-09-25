@@ -1,8 +1,11 @@
 package com.rtree.LIFELiNK
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
+import android.location.Geocoder
 import android.os.Bundle
+import android.os.SystemClock
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -14,8 +17,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -38,8 +44,12 @@ import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.GoogleAuthProvider
+import java.time.Instant
+import java.util.Locale
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -58,8 +68,31 @@ class MainActivity : ComponentActivity() {
 private fun SetupScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val apiClient = remember { LifeLinkApiClient() }
+    val safetyGate = remember { EmergencySafetyGate(context) }
     var status by remember { mutableStateOf("Googleでログインしてください") }
     var locationText by remember { mutableStateOf("位置情報はまだ保存されていません") }
+    var currentLocation by remember { mutableStateOf<LocationSnapshot?>(null) }
+    var contactName by remember { mutableStateOf("") }
+    var contactPhone by remember { mutableStateOf("") }
+    var contactId by remember { mutableStateOf<String?>(null) }
+    var contactText by remember { mutableStateOf("緊急連絡先は未登録です") }
+    var initialNote by remember { mutableStateOf("") }
+    var armedAt by remember { mutableStateOf<Long?>(null) }
+    var emergencyText by remember { mutableStateOf("緊急発信は待機中です") }
+
+    suspend fun captureAndSaveLocation() {
+        runCatching {
+            captureLocation(context).also { location ->
+                apiClient.saveLocation(location)
+            }
+        }.onSuccess { location ->
+            currentLocation = location
+            locationText = location.displayText()
+        }.onFailure { error ->
+            locationText = "位置保存失敗: ${error.userMessage()}"
+        }
+    }
 
     val requestLocationPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
@@ -68,7 +101,7 @@ private fun SetupScreen() {
             grants[Manifest.permission.ACCESS_COARSE_LOCATION] == true
         ) {
             scope.launch {
-                locationText = captureLocation(context)
+                captureAndSaveLocation()
             }
         } else {
             locationText = "位置情報の権限が拒否されました"
@@ -78,12 +111,13 @@ private fun SetupScreen() {
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(24.dp),
-        verticalArrangement = Arrangement.Center,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text("LIFELiNK", style = MaterialTheme.typography.headlineLarge)
         Text("You are never alone.", style = MaterialTheme.typography.bodyLarge)
-        Spacer(Modifier.height(32.dp))
+        Spacer(Modifier.height(20.dp))
         Text(status)
         Spacer(Modifier.height(12.dp))
         Button(
@@ -96,7 +130,7 @@ private fun SetupScreen() {
         ) {
             Text("Googleでログイン")
         }
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(12.dp))
         Text(locationText)
         Spacer(Modifier.height(12.dp))
         Button(
@@ -112,7 +146,7 @@ private fun SetupScreen() {
 
                 if (hasLocationPermission) {
                     scope.launch {
-                        locationText = captureLocation(context)
+                        captureAndSaveLocation()
                     }
                 } else {
                     requestLocationPermission.launch(
@@ -124,9 +158,93 @@ private fun SetupScreen() {
                 }
             },
         ) {
-            Text("現在位置を取得")
+            Text("現在位置を取得して保存")
         }
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(12.dp))
+        Text(contactText)
+        OutlinedTextField(
+            modifier = Modifier.fillMaxWidth(),
+            value = contactName,
+            onValueChange = { contactName = it },
+            label = { Text("連絡先名") },
+            singleLine = true,
+        )
+        OutlinedTextField(
+            modifier = Modifier.fillMaxWidth(),
+            value = contactPhone,
+            onValueChange = { contactPhone = it },
+            label = { Text("電話番号（+81...）") },
+            singleLine = true,
+        )
+        Button(
+            modifier = Modifier.fillMaxWidth(),
+            enabled = contactName.isNotBlank() && contactPhone.isNotBlank(),
+            onClick = {
+                scope.launch {
+                    runCatching {
+                        apiClient.createContact(contactName, contactPhone)
+                    }.onSuccess { contact ->
+                        contactId = contact.contactId
+                        contactText = "登録済み: $contactName / ${contact.maskedPhone}"
+                    }.onFailure { error ->
+                        contactText = "連絡先登録失敗: ${error.userMessage()}"
+                    }
+                }
+            },
+        ) {
+            Text("緊急連絡先を登録")
+        }
+        OutlinedTextField(
+            modifier = Modifier.fillMaxWidth(),
+            value = initialNote,
+            onValueChange = { initialNote = it },
+            label = { Text("状況メモ（任意）") },
+        )
+        Text(emergencyText)
+        Button(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(64.dp),
+            enabled = contactId != null,
+            onClick = {
+                val now = SystemClock.elapsedRealtime()
+                val armed = armedAt
+                if (armed == null || now - armed > EMERGENCY_CONFIRM_WINDOW_MS) {
+                    armedAt = now
+                    emergencyText = "10秒以内にもう一度押すと発信します"
+                    return@Button
+                }
+
+                armedAt = null
+                val selectedContactId = contactId ?: return@Button
+                val attempt = safetyGate.begin(selectedContactId)
+                emergencyText = if (attempt.isRetry) {
+                    "同じ発信要求を再送しています"
+                } else {
+                    "発信を開始しています"
+                }
+                scope.launch {
+                    runCatching {
+                        apiClient.createEmergencyEvent(
+                            eventId = attempt.eventId,
+                            contactId = selectedContactId,
+                            location = currentLocation,
+                            initialNote = initialNote,
+                        )
+                    }.onSuccess { event ->
+                        emergencyText = "発信状態: ${event.state}"
+                    }.onFailure { error ->
+                        if (error is ApiException && error.statusCode in 400..499) {
+                            safetyGate.clear(attempt.eventId)
+                        }
+                        emergencyText = "発信失敗: ${error.userMessage()}"
+                    }
+                }
+            },
+        ) {
+            Text(if (armedAt == null) "緊急発信" else "発信を確定")
+        }
+        Spacer(Modifier.height(12.dp))
         Text("Backend: ${BuildConfig.BACKEND_URL}", style = MaterialTheme.typography.bodySmall)
     }
 }
@@ -159,7 +277,7 @@ private suspend fun signInWithGoogle(context: android.content.Context): String {
     }
 }
 
-private suspend fun captureLocation(context: android.content.Context): String {
+private suspend fun captureLocation(context: Context): LocationSnapshot {
     val hasFine = ContextCompat.checkSelfPermission(
         context,
         Manifest.permission.ACCESS_FINE_LOCATION,
@@ -169,23 +287,56 @@ private suspend fun captureLocation(context: android.content.Context): String {
         Manifest.permission.ACCESS_COARSE_LOCATION,
     ) == PackageManager.PERMISSION_GRANTED
     if (!hasFine && !hasCoarse) {
-        return "位置情報の権限が必要です"
+        error("位置情報の権限が必要です")
     }
 
-    return runCatching {
-        val location = LocationServices.getFusedLocationProviderClient(context)
-            .getCurrentLocation(
-                if (hasFine) Priority.PRIORITY_HIGH_ACCURACY else Priority.PRIORITY_BALANCED_POWER_ACCURACY,
-                CancellationTokenSource().token,
-            )
-            .await()
-            ?: error("位置を取得できませんでした")
-        "緯度 %.6f / 経度 %.6f / 精度 %.0fm".format(
-            location.latitude,
-            location.longitude,
-            location.accuracy,
+    val location = LocationServices.getFusedLocationProviderClient(context)
+        .getCurrentLocation(
+            if (hasFine) Priority.PRIORITY_HIGH_ACCURACY else Priority.PRIORITY_BALANCED_POWER_ACCURACY,
+            CancellationTokenSource().token,
         )
-    }.getOrElse { error ->
-        "位置取得失敗: ${error.message ?: "unknown error"}"
-    }
+        .await()
+        ?: error("位置を取得できませんでした")
+    val capturedAt = Instant.now().toString()
+    val address = reverseGeocode(context, location.latitude, location.longitude)
+    return LocationSnapshot(
+        latitude = location.latitude,
+        longitude = location.longitude,
+        accuracyMeters = location.accuracy,
+        capturedAt = capturedAt,
+        address = address,
+        geocodedAt = address?.let { Instant.now().toString() },
+    )
 }
+
+@Suppress("DEPRECATION")
+private suspend fun reverseGeocode(
+    context: Context,
+    latitude: Double,
+    longitude: Double,
+): String? = withContext(Dispatchers.IO) {
+    runCatching {
+        Geocoder(context, Locale.JAPAN)
+            .getFromLocation(latitude, longitude, 1)
+            ?.firstOrNull()
+            ?.getAddressLine(0)
+    }.getOrNull()
+}
+
+private fun LocationSnapshot.displayText(): String =
+    "${address ?: "住所不明"}\n緯度 %.6f / 経度 %.6f / 精度 %.0fm".format(
+        latitude,
+        longitude,
+        accuracyMeters,
+    )
+
+private fun Throwable.userMessage(): String = when (this) {
+    is ApiException -> when (errorCode) {
+        "world_id_verification_required" -> "World IDで人間証明してください"
+        "contact_not_found" -> "登録した連絡先が見つかりません"
+        else -> errorCode
+    }
+    else -> message ?: "不明なエラー"
+}
+
+private const val EMERGENCY_CONFIRM_WINDOW_MS = 10_000L
