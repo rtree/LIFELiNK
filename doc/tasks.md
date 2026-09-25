@@ -43,18 +43,18 @@
 
 ## P1: 実通話成立後
 
-**2026-09-26 方針（訂正、議論・確定待ち）**: 前回「ハッカソン提出物としては実装しない」と書いたのは誤り。正しくは P0-15 が通り次第フル実装へ進む。ただし手戻りを避けるため、実装順序を **P2（本物のデータストア）→ P1（そのストアの上にフル UI を実装）→ 主線再確認 → 追加機能** の順にする提案が出ている（`doc/plan.md` 3 章「主線完了後の実装順序」参照）。この提案がチームで確定するまで、以下の P1/P2 タスクは着手を保留する（設計・rules の先回りは済んでいるので、確定後すぐ着手できる状態にはある）。
+**2026-09-26 方針（確定）**: P0-15 が通り次第フル実装へ進む。手戻りを避けるため実装順序を **P2（`delegations` を含むフルセットの本物のデータストア）→ P1（そのストアの上にフル UI を実装）→ 主線再確認 → 追加機能** の順に確定（`doc/plan.md` 3 章「主線完了後の実装順序」参照）。P0 の `emergency_events`/`updates` の既存テストデータは移行しない（新規イベントから P2 スキーマを使う）。Android の Full UI 着手は backend の P2 実装（P2-01〜P2-06）完了後とする（モックデータでの並行着手はしない）。
 
 | ID | 状態 | タスク | 依存 | 完了条件 |
 | --- | --- | --- | --- | --- |
 | P1-01 | TODO | フル UI モックの残る未決 2 論点（`doc/plan.md` 4a 章、論点 1（警察自動通報の文言）は 2026-09-26 に人間が「登録済み緊急連絡先に限定し、警察を目標にしない」と決定済み）を確定する: (1) 通話録音・書き起こしを友人へ共有するか、(2) 友人共有 UI をアプリ内自作（Option A）にするか実 Discord bot（Option B）にするか | P0-15 | ハッカソン提出物としては上記方針で保留。決定を `doc/plan.md` 4a 章に反映済み |
 | P1-01a | TODO | Discord 個別連絡先方式の可否を決定する（4a 章の候補設計）。電話先と DM 受信者の関係・人数・通知同意・返信の AI 注入有無・Social SDK 申請要否を確定する | P1-01、受信者の事前同意 | 友人一覧に通常 OAuth ではアクセスできない制約を踏まえ、招待・本人確認・公開範囲・フォールバックを合意して `doc/plan.md` に記録 |
 | P1-01b | TODO | P1-01a で Discord 個別連絡を選んだ場合、招待→受信者 opt-in→Bot テスト DM→モーダル返信→`updates` 保存の最小縦断フローを実装・実測する | P1-01a、P0-15 | 事前同意済みの相手で配送成功/失敗が区別され、返信が許可したイベントに一回だけ記録される。電話発信は Discord 障害でも継続する |
-| P1-02 | TODO | `friend_links` コレクションと招待コード発行・承認 API（`/v1/friends/*`）を実装する（P1-01 で Option A を選んだ場合） | P0-15、P0.5-01、P1-01 | 相互承認済みの友人一覧が取得でき、`pending`/`accepted`/`blocked` を切り替えられる |
-| P1-03 | TODO | `emergency_events.participant_uids` のスナップショット生成と Firestore security rules を実装する | P1-02 | イベント作成時点の友人だけが該当イベントを読み取れ、後から友人になった uid はアクセスできないことを確認 |
-| P1-04 | TODO | `updates` フィードへ `friend_comment`・`transcript_contact`・`transcript_ai` を書き込む処理を実装する（入力音声 transcription 有効化を含む） | P1-03、P0-11 | 通話中の両者の発話と友人コメントが同一フィードに時系列で保存される |
-| P1-05 | TODO | 友人コメントを `conversation.item.create` + `response.create` で進行中の Realtime セッションへ注入する | P1-04 | 通話を切らずに友人コメントの内容が相手へ音声で伝わる |
-| P1-06 | TODO | 友人共有 UI を実装する（Option A: アプリ内 Discord 風画面 / Option B: 実 Discord bot 連携。P1-01 の決定に従う） | P1-01、P1-02〜P1-05（Option A）または Discord bot 基盤構築（Option B） | 自分と共有されたイベントを時系列表示し、通話中にコメント投稿できる。Option B の場合はアプリ未インストールの友人が Discord だけで受信・返信できる |
+| P1-02 | TODO | `friend_links` コレクションと招待コード発行・承認 API（`/v1/friends/*`）を実装する（P1-01 で Option A を選んだ場合） | P2-01〜P2-06完了、P0.5-01、P1-01 | 相互承認済みの友人一覧が取得でき、`pending`/`accepted`/`blocked` を切り替えられる |
+| P1-03 | TODO | `emergencySessions.participant_uids` の友人招待時のスナップショット反映を `friend_links` と結び付けて実装する（P2-01 ですでに作った rules/スナップショットロジックを `friend_links` の承認状態と接続するだけでよい。旧 `emergency_events` 向けの作業は不要） | P1-02 | イベント作成時点の友人だけが該当 `emergencySessions` を読み取れ、後から友人になった uid はアクセスできないことを確認 |
+| P1-04 | TODO | `timeline`（+ 必要なら `facts`）へ `friend_comment` 種類のレコードを書き込む処理を実装する（P2-02 で実装済みの `timelineStore.ts` を利用。入力音声 transcription は P2-02 の `transcript_ai`/`transcript_contact` として既に履歴化されている前提） | P1-03、P2-02 | 通話中の両者の発話と友人コメントが同一 `timeline` に時系列で保存される |
+| P1-05 | TODO | 友人コメントを `realtimeBridge.ts`（P2-05）経由で進行中の Realtime セッションへ注入する | P1-04、P2-05 | 通話を切らずに友人コメントの内容が相手へ音声で伝わる |
+| P1-06 | TODO | 友人共有 UI を実装する（Option A: アプリ内 Discord 風画面 / Option B: 実 Discord bot 連携。P1-01 の決定に従う。`facts`/`timeline`/`delegations` を直接読む） | P2-01〜P2-06完了、P1-01、P1-02〜P1-05（Option A）または Discord bot 基盤構築（Option B） | 自分と共有されたイベントを時系列表示し、通話中にコメント投稿できる。Option B の場合はアプリ未インストールの友人が Discord だけで受信・返信できる |
 | P1-06a | TODO | `users/{uid}` へ `nickname`/`area` フィールドを追加し、プロフィール設定画面（モック 1-5）を実装する | P0-15 | ニックネームとエリアを保存・再取得でき、エリアを住所表示や連絡先の文脈情報に利用できる |
 | P1-06b | TODO | 端末ローカルの 2 段階音声アナウンス（送信時 stage1・接続時 stage2、JP/EN/両方、Silent SOS トグル）を実装する | P0-09、P0-13（`in-progress`/`answered` を判定する Twilio status） | 送信直後に stage1 が即時発話され、Twilio status が `answered`/`in-progress` を報告した時だけ stage2 が発話される。Silent SOS 有効時は両方無音になる |
 | P1-07 | TODO | Android 周辺音声の扱いを設計・実装する | P0-15、同意・法務判断 | 明示同意と状態表示のもとで音声を通話へ追加可能 |
@@ -69,11 +69,11 @@
 
 ## P2: GPT Live 状況ストアと Responses delegation
 
-`doc/plan.md` 8a 章の設計に対応する実装タスク。**提案どおりなら P1 のフル UI より先に着手する**（`doc/plan.md` 3 章「主線完了後の実装順序」参照、議論・確定待ち）。P0-15 が通り次第、まず `situationStore.ts`/`timelineStore.ts` の最小限の本物のストアを作ることを優先する。
+`doc/plan.md` 8a 章の設計に対応する実装タスク。**2026-09-26 確定: P0-15 の直後、P1 のフル UI より先に、`delegations` を含むフルセットで着手する**（部分実装ではない）。`doc/plan.md` 3 章「主線完了後の実装順序」参照。既存 `emergency_events`/`updates` の実機テストデータは移行しない（新規イベントから `emergencySessions` 系スキーマを使う）。
 
 | ID | 状態 | タスク | 依存 | 完了条件 |
 | --- | --- | --- | --- | --- |
-| P2-01 | TODO | `situationStore.ts`: `facts` の append・`state/current` の materialization・`sequence` 採番・認可を実装する（ルート直下の `emergencySessions/{session_id}` 配下、2026-09-26 にネスト案からルート直下に差し戻し済み） | P0-15、P1-03 | Android fact が一度だけ保存され、`state/current` の `version` が単調増加する |
+| P2-01 | TODO | `situationStore.ts`: `facts` の append・`state/current` の materialization・`sequence` 採番・認可を実装する（ルート直下の `emergencySessions/{session_id}` 配下、2026-09-26 にネスト案からルート直下に差し戻し済み。`participant_uids` のスナップショット生成はこのタスク自体で実装し、P1-02（`friend_links`）の完成を待たない） | P0-15 | Android fact が一度だけ保存され、`state/current` の `version` が単調増加する |
 | P2-02 | TODO | `timelineStore.ts`: `timeline` への transcript/UI 履歴書き込みを実装する（8a 章の `delivery` 状態遷移を含む） | P2-01 | 割り込み時に `conversation.item.truncate` と連動して `interrupted` が記録される |
 | P2-03 | TODO | `realtimeTools.ts`: `get_current_situation`/`get_session_history` の同期 tool と routing 規則を実装する | P2-01、P2-02 | 「今どこ」「さっき何と言ったか」に根拠 `fact_id` 付きで即答できる |
 | P2-04 | TODO | `delegationStore.ts` + `responsesDelegate.ts`: `delegate_investigation` の非同期委譲（`background: true`、poll、`call_id` 冪等化）を実装する | P2-03 | 保留発話が一回だけ発話され、Responses 完了後に同じ通話へ結果が音声で返る |
