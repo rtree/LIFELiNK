@@ -268,6 +268,145 @@ GATT Notify を物理ボタンの主経路とする。XIAO nRF52840 が Peripher
 - XIAO 側は GPIO を `INPUT_PULLUP` で読み、長押し判定も XIAO 側で行う。押しっぱなしでも `LONG_PRESS` は一回だけ生成し、Android が Notify 購読済みの場合だけ送信する。ACK 済みイベントは再通知しない。
 - firmware は `firmware/xiao_gatt_button/`、Android の GATT 契約は `app/.../gatt_experiment/` に置く。
 
+## 6c. GATT 常時監視の詳細設計（Android、Phase 7 実装時に適用）
+
+6b 章の GATT 経路を、画面 OFF・ロック中・バックグラウンドでどこまで維持するかの詳細設計。他チームの実装済み範囲は変更せず、Phase 7 着手時にこの設計を使う。
+
+前提として「常時受信を保証する」ことは目標にしない。Android/OEM、Bluetooth controller、無線環境、Peripheral、ユーザー操作のいずれでも配送は途切れ得る。目標は次の 3 点に限定する。
+
+1. GATT Notify を主経路として、ユーザー開始後の 2 時間セッション中に接続を最大限維持する。
+2. GATT が切れている時間を、厳密 Filter の PendingIntent BLE scan と Companion Device presence で可能な範囲だけ補う（Beacon 予備経路は 6b 章のとおり）。
+3. 実機ログから `READY` 時間率・押下受信率・再接続時間を測り、観測値で可否を決める。「動いているはず」という前提では判断しない。
+
+### 採用構成
+
+| 手段 | 採用 | 役割 | 保証しないこと |
+| --- | --- | --- | --- |
+| `connectedDevice` FGS | 必須 | プロセス優先度、GATT owner、常駐通知 | プロセス不死、Notify 配送、OEM 挙動 |
+| 接続済み GATT Notify | 主経路 | 最低遅延、ACK 可能 | process death 後の維持 |
+| filtered PendingIntent scan | 必須の予備 | process 不在時にも一致広告で起動を試みる | Doze/force-stop 中の即時配送 |
+| Companion Device presence | 条件付き推奨 | presence 時の system binding、再接続契機、背景 FGS 開始の補助 | GATT 接続・CCCD 購読の代行 |
+| `PARTIAL_WAKE_LOCK` | 実験的に採用 | 通常時の CPU sleep 抑制 | Doze 回避（Doze 中は無視され得る） |
+| battery optimization 除外 | 配布条件を確認して採用 | Doze/App Standby 制限の緩和、背景 FGS 開始例外 | OEM kill の完全回避 |
+| `location` FGS type | 継続的に位置を取る場合のみ | 背景位置取得 | BLE 接続維持そのもの |
+| `START_STICKY`/boot 自動復旧 | 初版不採用 | 将来の監視復旧候補 | arm 復元、安全な自動発信 |
+
+補足: `BluetoothGatt` は process-bound であり、プロセスが kill されると接続は閉じる。FGS・wake lock・PendingIntent scan のどれも既存 GATT を process death 越しに保存しない。`SCAN_MODE_LOW_LATENCY` は foreground 中のみ有効化が推奨され、background では `LOW_POWER` が強制され得る。`PARTIAL_WAKE_LOCK` は Doze を解除しない。API 34 の `ALL_MATCHES_AUTO_BATCH` は画面 OFF 時に最低 10 分 batch になるため使わない。
+
+### コンポーネント境界
+
+```text
+Activity / Compose UI
+  - 権限説明、association、監視開始、arm、状態表示。BluetoothGatt は保持しない
+
+MonitoringService (connectedDevice FGS)
+  - MonitoringSession の唯一の owner
+  - GattController、BeaconRegistration、WakeLock、期限 timer を所有し、常駐通知を更新する
+
+CompanionPresenceService (任意)
+  - presence callback だけを受ける。GATT は所有しない
+  - 実行中 MonitoringService へ再接続契機を渡すだけで、セッションが無ければ勝手に arm しない
+
+BeaconReceiver
+  - PendingIntent scan 結果を parse・検証する。GATT/電話 API を直接呼ばない
+  - 共通 TriggerIngress へ候補イベントを渡す
+
+TriggerIngress -> EventGate -> SafetyGate
+  - GATT/Beacon の共通化、重複排除、鮮度、arm、cooldown。通過後だけ位置取得と backend 要求へ進む
+```
+
+`MonitoringService` と `CompanionPresenceService` の両方が `connectGatt()` を呼ぶ構成は禁止する。常に一つの owner、一つの active `BluetoothGatt`、直列化された GATT operation queue とする。
+
+### セッション状態モデル
+
+```text
+STOPPED -> STARTING -> CONNECTING -> CONNECTED -> DISCOVERING -> SUBSCRIBING -> READY
+READY/CONNECTING/... -> DEGRADED(reason) -> RECONNECT_WAIT -> CONNECTING
+any -> STOPPING -> STOPPED
+```
+
+`READY` の条件はすべて AND とする: FGS が有効で常駐通知を表示済み／監視セッションが期限内／Bluetooth ON かつ必要権限あり／対象 device との GATT 接続が `STATE_CONNECTED`／service discovery 成功で期待する service/characteristic UUID が一意に存在／`setCharacteristicNotification(..., true)` 成功／CCCD へ `ENABLE_NOTIFICATION_VALUE` を write して成功 callback 受信／Peripheral epoch を現在セッションの値として確立／GATT operation queue に破損・timeout がない。接続 callback だけで `READY` にせず、CCCD 再購読前の callback・旧 Gatt instance からの callback・旧 epoch の Notify は発信候補にしない。
+
+各接続試行に単調増加の `connectionGeneration` を付け、callback は Gatt instance と generation の両方が現行値に一致するときだけ処理する。stop/reconnect 時は先に generation を更新してから `disconnect()`/`close()` する。各監視開始にランダムな `monitoringSessionId` を発行し、これは電話の arm とは別で、process death/reboot 後に arm を復元しない。
+
+### 接続・再接続ポリシー
+
+- 初回接続: UI 表示中に FGS を開始して 5 秒以内に `startForeground()`、既知の `BluetoothDevice` へ `connectGatt()`、GATT operation は必ず一つずつ実行し、service discovery → 必要な場合のみ MTU → Notify 設定 → CCCD write の順で進める。`autoConnect=true` と `false + 手動 backoff` を実機で A/B 比較し、どちらを採用するかは対象 Samsung 実機の「圏外離脱 10 分後の復帰時間」と「Bluetooth OFF/ON 復帰時間」で決める。
+- bounded reconnect（`autoConnect` が回復しない場合のみ）: backoff は 1・2・4・8・16・30・30 秒（jitter ±20%）、連続 7 回または 5 分で active retry を停止し `DEGRADED(RECONNECT_EXHAUSTED)` とする。停止後もセッション期限までは Companion presence・filtered scan・Bluetooth ON・ユーザーの通知操作を再試行契機にできる。同時接続試行は禁止。Bluetooth OFF 中は回数を消費せず待機する。権限取消・association 消失・service/characteristic 不一致は retry せず安全停止する。GATT status 133 等を個別の「成功扱い」にせず、status・newState・試行番号・経過時間を記録する。
+- Peripheral（XIAO）側要件: 接続中も必要に応じて connectable advertising を再開できること、stable public/static random address または bond 済み Resolvable Private Address を使うこと（Companion presence 併用時は OS が解決できない rotating random MAC を避ける）、CCCD 有効前は Notify を送らないこと、ACK timeout による再送でも Android 側で同一 event として重複排除できること。再接続時に未 ACK の旧押下を自動送信するかは初版では「送らない」。store-and-forward を採る場合はイベント発生時刻と鮮度上限を protocol へ追加する。
+
+### Beacon との統合（重複排除の優先順）
+
+固定 UUID/major/minor だけでは GATT の `epoch/eventId` と厳密に同一イベントだと証明できない。次の優先順で統合する。
+
+1. firmware が広告 payload に同じ epoch/eventId の短縮表現を載せられるなら完全一致で重複排除する。
+2. 変更できない iBeacon なら、device identity + action + 受信時刻による短い dedup window を使い `dedupReason=temporal_fallback` を記録する。
+3. GATT `READY` 中に Beacon も届いた場合、同一性を確認できるときだけ GATT を優先する。不明なイベントを無条件に捨てず、Safety gate の arm 一回制約で二重発信を防ぐ。
+
+Beacon 受信を理由に GATT を切断しない。Beacon 受信から Android 12 以降に新規 FGS を起動できるとは限らないため、実行中セッションへの入力か短い Worker での記録に限定する。
+
+### Companion Device の採用条件
+
+次を満たす場合のみ association と presence observation を追加する: XIAO をユーザーが一台ずつ明示関連付けできる／stable address または bond 済み RPA を使える／対象端末が `FEATURE_COMPANION_DEVICE_SETUP` を持つ／API 31 以上で `CompanionDeviceService` を利用できる。API 31〜35 では address 版 `startObservingDevicePresence()`、API 36 以上では `ObservingDevicePresenceRequest` を使う。Companion association は pairing/GATT connection ではなく、`CompanionPresenceService` は再接続を依頼するだけで監視セッションも arm も生成しない。
+
+### 権限と Foreground Service Type
+
+- 候補: `BLUETOOTH_SCAN`/`BLUETOOTH_CONNECT`（API 31+）、`BLUETOOTH`/`BLUETOOTH_ADMIN`（`maxSdkVersion=30`）、`FOREGROUND_SERVICE`、`FOREGROUND_SERVICE_CONNECTED_DEVICE`（target 34+）、`POST_NOTIFICATIONS`（API 33+、製品上必須扱い）、`WAKE_LOCK`、位置権限（継続位置取得が確定した場合のみ `ACCESS_BACKGROUND_LOCATION`/`FOREGROUND_SERVICE_LOCATION`）、`REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`（Play policy 適合性を確認して採用）、Companion 関連 permission（採用時のみ）。
+- service type は常に最小化する。GATT 維持だけなら `connectedDevice`。継続位置取得が要件になった場合のみ `connectedDevice|location` とし、Android 14+ の while-in-use 制約に備え UI 表示中に開始する。
+- 開始前チェック: Bluetooth adapter 利用可能、runtime Bluetooth 権限、通知権限、選択した service type の permission、（該当時）位置サービスと位置権限、association/device identity、battery optimization 除外、Safety gate の dry-run 初期値・arm 状態・登録先の安全性。設定画面から戻っただけでは開始・arm しない。
+
+### 常駐通知
+
+表示する情報: 接続状態（`接続中`/`準備完了`/`再接続中`/`Bluetooth OFF`/`要確認`）、残り時間、停止 action。表示しない情報: 電話番号、連絡先名、BLE address/UUID、eventId、位置、認証状態の詳細、失敗 payload。`READY` の喪失・復帰は即時更新し、通知を出せない状態では MAX 監視を開始しない。
+
+### 停止・復旧ポリシー
+
+停止手順（2 時間到達・通知の停止 action・FGS Task Manager からの停止・権限取消・association 消失・永続化失敗のいずれでも共通）:
+
+```text
+generation 無効化 -> disarm -> scan 停止 -> GATT disconnect/close
+-> presence 停止（製品方針による） -> WakeLock 解放
+-> session 状態保存 -> foreground 停止 -> stopSelf
+```
+
+| 状況 | 初版の挙動 |
+| --- | --- |
+| Activity 終了 | FGS/GATT を継続 |
+| task swipe | 端末差を測定。`onTaskRemoved()` で勝手に再 arm しない |
+| Bluetooth OFF | `DEGRADED`、retry 停止、ON 後に再接続 |
+| 一時圏外/GATT error | bounded reconnect |
+| process kill | GATT 喪失。PendingIntent/CDM callback が届いても arm 復元なし |
+| force-stop | 復旧不可 |
+| reboot | 初版は監視・arm とも手動再開 |
+| app update | `MY_PACKAGE_REPLACED` からの自動監視は実機・ポリシー確認後 |
+| FGS Task Manager の停止 | 完全停止・disarm、ユーザー再開待ち |
+
+監視継続と発信許可は完全に別 state machine のままとする（6b・7 章と同じ Safety gate を使う）。監視開始で arm しない、arm は明示操作から 15 分一回限り、発信試行後 60 秒 cooldown、reboot/process death/service 停止で必ず disarm、dry-run が初期値。認証切れは監視を直ちに切る理由にしなくてよいが、発信は拒否して安全な状態だけ表示する。
+
+### 実機試験計画
+
+対象 matrix: Samsung Galaxy 実機（One UI）、Pixel または AOSP 寄り端末、Android 12/14/16 のうち利用可能な実機、充電中/非充電、battery optimization ON/OFF、Companion presence 有/無、`autoConnect` true/false。
+
+主なシナリオ: 画面 ON での `READY` 到達と Notify/ACK 一回性、同一/過去 eventId・epoch 変更・旧 generation callback の拒否、画面 OFF/ロック後 1・10・30・60・120 分での押下、`dumpsys deviceidle force-idle` による Doze 強制時の GATT/Beacon 別測定、`am set-inactive` による App Standby 確認、距離離脱・Bluetooth OFF/ON・Peripheral reboot からの復帰、Activity 終了/task swipe/force-stop、各種権限取消、2 時間期限での全停止確認、ネットワーク断・token 失効時の二重発信なし確認。
+
+初期合格案: 2 時間セッションの `READY` 時間率 99% 以上（通常据置条件）、`READY` 中の GATT 押下受信 100/100 かつ重複発信 0、30 秒以内の再 `READY` 95% 以上、Beacon 単独は保証値を置かず状態別 p50/p95 配送遅延と欠落率を報告、force-stop 後 0 受信を期待結果として明記。少数回成功だけで「常時」と表示しない。
+
+### Samsung 運用
+
+対象端末では次をユーザー案内と開始時 health check に含める: Battery and device care > Battery > Background usage limits、Deep sleeping apps からの除外、Never sleeping apps への追加、アプリ個別 Battery を Unrestricted に、Power saving/Adaptive battery/unused app permission reset の影響確認。設定名・実効性は OS update で変わるため、設定済みを保証根拠にせず update 後も再試験する。
+
+### 統合時の作業分割
+
+他チームとの競合を避けるため、担当を次の単位で分ける。
+
+1. `ble-core`: protocol parser、generation、state reducer、dedup（Android API 非依存の unit test 付き）
+2. `gatt-android`: GattController と operation queue（Service/UI/backend を触らない）
+3. `monitoring-service`: FGS、通知、WakeLock、期限、stop path
+4. `beacon-android`: ScanFilter、PendingIntent、Receiver（TriggerIngress まで）
+5. `companion-android`: association/presence の実験 feature flag
+6. `firmware`: address 方針、advertising、Notify/ACK、event identity
+7. `device-test`: adb harness、ログ収集、matrix 結果
+
 ### Android から通話への接続（Beacon/GATT 共通）
 
 ```text
@@ -460,10 +599,27 @@ BLE 層から電話 API や Firebase を直接呼ばない。Android Controller 
 - イベント、位置、メモの保持期間
 - Firebase Authentication の Google provider有効化とOAuth同意画面のサポートメール選択
 
+Phase 7（GATT）着手前に決める項目（6c 章参照）:
+
+- minSdk と対象 Samsung 機種/One UI バージョン
+- firmware の MAC address 方式と bonding 可否
+- Beacon 広告に GATT と共通の event identity を載せられるか
+- `location` Foreground Service Type を監視開始時から使うか、発報後だけ位置取得するか
+- Companion Device 権限と battery optimization 除外の Play policy 方針
+- 2 時間経過後に完全停止するか、監視だけ手動延長 UI を出すか
+
 ## 14. 公式参照先
 
 - Android location permissions: https://developer.android.com/develop/sensors-and-location/location/permissions
 - Android BLE background communication: https://developer.android.com/develop/connectivity/bluetooth/ble/background
+- Android Foreground service types: https://developer.android.com/develop/background-work/services/fgs/service-types
+- Android Restrictions on starting FGS from background: https://developer.android.com/develop/background-work/services/fgs/restrictions-bg-start
+- Android API `BluetoothLeScanner`: https://developer.android.com/reference/android/bluetooth/le/BluetoothLeScanner
+- Android API `ScanSettings`: https://developer.android.com/reference/android/bluetooth/le/ScanSettings
+- Android API `CompanionDeviceManager`: https://developer.android.com/reference/android/companion/CompanionDeviceManager
+- Android API `CompanionDeviceService`: https://developer.android.com/reference/android/companion/CompanionDeviceService
+- Android Doze and App Standby: https://developer.android.com/training/monitoring-device-state/doze-standby
+- Samsung公式 Sleeping apps on Galaxy: https://www.samsung.com/us/support/answer/ANS00088422/
 - Firebase Authentication for Android: https://firebase.google.com/docs/auth/android/start
 - Firebase ID token verification: https://firebase.google.com/docs/auth/admin/verify-id-tokens
 - Firestore security rules: https://firebase.google.com/docs/firestore/security/get-started
