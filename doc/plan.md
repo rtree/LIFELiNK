@@ -507,7 +507,7 @@ BLE 層から電話 API や Firebase を直接呼ばない。Android Controller 
 - Twilio 発信番号（末尾 1880）: Secret `key-twilio-from-number`
 - OpenAI API key: Secret `key-openai-ethglobaltokyo-nolimit`
 - Google Maps Geocoding API key
-- World ID RP signing key: Secret `key-world-id-rp-signing`（コンテナ・IAM準備済み、値はPortalでRP構成後に人間が直接登録）
+- World ID RP signing key: Secret `key-world-id-rp-signing`（version 1登録済み。Cloud Runでは`WORLD_ID_RP_SIGNING_KEY`として参照し、値は記録しない）
 
 秘密値はチャット、Git、README、`doc/plan.md`、コマンド出力へ掲載しない。Agent が Secret を生成または一度だけ受け取る場合は、表示せず Secret Manager へ直接保存してから利用する。Cloud Run ではサービスアカウントの Application Default Credentials を使い、可能な限り service account JSON key を作らない。
 
@@ -527,6 +527,7 @@ BLE 層から電話 API や Firebase を直接呼ばない。Android Controller 
 - Twilio Phone Number SID、Call SID（電話番号や token は記録しない）
 - World ID `app_id`、`rp_id`、action、environment（signing key は記録しない）
 - World ID app ID: `app_30fbdcf47be73f8a3603f0633b8aeb7c`（LIFELiNK、production external）
+- World ID RP ID: `rp_f73bfaa54987b8ce`（managed。production/stagingともにregistered）
 
 ## 11. 実装フェーズ
 
