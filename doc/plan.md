@@ -504,7 +504,7 @@ BLE 層から電話 API や Firebase を直接呼ばない。Android Controller 
 
 - Twilio Account SID: Secret `key-twilio-sid`
 - Twilio Auth Token: Secret `key-twilio-authToken`
-- Twilio 発信番号
+- Twilio 発信番号（末尾 1880）: Secret `key-twilio-from-number`
 - OpenAI API key: Secret `key-openai-ethglobaltokyo-nolimit`
 - Google Maps Geocoding API key
 - World ID RP signing key（World ID 実装時）
@@ -520,7 +520,7 @@ BLE 層から電話 API や Firebase を直接呼ばない。Android Controller 
 - Firebase Android app ID: `1:1023311564471:android:b4e6ad83334551f40e0732`
 - Cloud Run service: `lifelink-backend`、region: `asia-northeast1`
 - Cloud Run URL: `https://lifelink-backend-1023311564471.asia-northeast1.run.app`
-- Cloud Run revision: `lifelink-backend-00002-lgf`
+- Cloud Run revision: `lifelink-backend-00004-nhs`
 - Firestore database ID: `(default)`、region: `asia-northeast1`
 - Cloud Run service account: `lifelink-backend@ethglobaltokyo2026lifelink.iam.gserviceaccount.com`
 - Secret 名と version（値は記録しない）
@@ -552,6 +552,7 @@ BLE 層から電話 API や Firebase を直接呼ばない。Android Controller 
 
 - Twilio Media Streams と OpenAI Realtime を bridge する。
 - 構造化された初回発話と通常会話を実装する。
+- 2026-09-25 に outbound call、Twilio署名検証、G.711 μ-law Media Streams、OpenAI Realtime bridgeをCloud Runへデプロイした。実受電による音声確認は未実施。
 - 完了条件: 相手が初回情報を聞き、AI と双方向に会話できる。
 
 ### Phase 4: 通話中更新

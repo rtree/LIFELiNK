@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 
+import formbody from "@fastify/formbody";
+import websocket from "@fastify/websocket";
 import { applicationDefault, getApps, initializeApp } from "firebase-admin/app";
 import { FieldValue, getFirestore } from "firebase-admin/firestore";
 import Fastify from "fastify";
@@ -7,6 +9,11 @@ import { z } from "zod";
 
 import { authenticate, requireHumanVerification } from "./auth.js";
 import { config } from "./config.js";
+import {
+  isValidTwilioRequest,
+  placeEmergencyCall,
+  registerMediaBridge,
+} from "./voice.js";
 
 if (getApps().length === 0) {
   initializeApp({
@@ -20,6 +27,33 @@ const app = Fastify({
   logger: {
     redact: ["req.headers.authorization", "body.phone"],
   },
+});
+
+await app.register(formbody);
+await app.register(websocket);
+
+registerMediaBridge(app, async (eventId) => {
+  const event = await db.collection("emergency_events").doc(eventId).get();
+  if (!event.exists) {
+    return null;
+  }
+  const location = event.get("location_snapshot") as
+    | {
+        address?: string | null;
+        latitude?: number;
+        longitude?: number;
+        accuracy_m?: number;
+        captured_at?: string;
+      }
+    | null;
+  return {
+    address: location?.address ?? null,
+    latitude: location?.latitude ?? null,
+    longitude: location?.longitude ?? null,
+    accuracyM: location?.accuracy_m ?? null,
+    capturedAt: location?.captured_at ?? null,
+    initialNote: (event.get("initial_note") as string | null) ?? null,
+  };
 });
 
 const contactSchema = z.object({
@@ -140,7 +174,11 @@ app.post(
         created_at: FieldValue.serverTimestamp(),
         updated_at: FieldValue.serverTimestamp(),
       });
-      return { outcome: "created" as const, state: "accepted" };
+      return {
+        outcome: "created" as const,
+        state: "accepted",
+        destination: contact.get("phone_e164") as string,
+      };
     });
 
     if (result.outcome === "contact_not_found") {
@@ -150,6 +188,32 @@ app.post(
       return reply.code(409).send({ error: "emergency_event_id_conflict" });
     }
 
+    if (result.outcome === "created") {
+      try {
+        const callSid = await placeEmergencyCall(
+          parsed.data.emergency_event_id,
+          result.destination,
+        );
+        await eventRef.update({
+          state: "dialing",
+          twilio_call_sid: callSid,
+          updated_at: FieldValue.serverTimestamp(),
+        });
+        result.state = "dialing";
+      } catch (error) {
+        app.log.error({ error, emergencyEventId: parsed.data.emergency_event_id }, "Twilio call failed");
+        await eventRef.update({
+          state: "failed",
+          failure_code: "twilio_call_failed",
+          updated_at: FieldValue.serverTimestamp(),
+        });
+        return reply.code(502).send({
+          error: "twilio_call_failed",
+          emergency_event_id: parsed.data.emergency_event_id,
+        });
+      }
+    }
+
     return reply.code(result.outcome === "created" ? 202 : 200).send({
       emergency_event_id: parsed.data.emergency_event_id,
       state: result.state,
@@ -157,6 +221,33 @@ app.post(
     });
   },
 );
+
+app.post("/v1/twilio/status", async (request, reply) => {
+  if (!isValidTwilioRequest(request)) {
+    return reply.code(403).send({ error: "invalid_twilio_signature" });
+  }
+  const query = request.query as { emergencyEventId?: string };
+  const body = request.body as { CallSid?: string; CallStatus?: string };
+  if (!query.emergencyEventId || !body.CallSid || !body.CallStatus) {
+    return reply.code(400).send({ error: "invalid_twilio_status" });
+  }
+  const stateByStatus: Record<string, string> = {
+    initiated: "dialing",
+    ringing: "dialing",
+    "in-progress": "in_progress",
+    completed: "completed",
+    busy: "failed",
+    failed: "failed",
+    "no-answer": "failed",
+    canceled: "failed",
+  };
+  await db.collection("emergency_events").doc(query.emergencyEventId).update({
+    state: stateByStatus[body.CallStatus] ?? body.CallStatus,
+    twilio_call_sid: body.CallSid,
+    updated_at: FieldValue.serverTimestamp(),
+  });
+  return reply.code(204).send();
+});
 
 app.setErrorHandler((error, _request, reply) => {
   app.log.error(error);
