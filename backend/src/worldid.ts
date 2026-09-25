@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 
 import {
   IDKit,
@@ -13,6 +15,24 @@ import { z } from "zod";
 
 import { authenticate } from "./auth.js";
 import { config } from "./config.js";
+
+const nativeFetch = globalThis.fetch;
+globalThis.fetch = async (input, init) => {
+  const url =
+    input instanceof URL
+      ? input
+      : new URL(typeof input === "string" ? input : input.url);
+  if (url.protocol !== "file:") {
+    return nativeFetch(input, init);
+  }
+
+  // idkit-core 4.3 resolves its packaged WASM as file:// in Node, while
+  // Node's native fetch only accepts HTTP(S).
+  const bytes = await readFile(fileURLToPath(url));
+  return new Response(bytes, {
+    headers: { "content-type": "application/wasm" },
+  });
+};
 
 function requireWorldIdConfig() {
   if (!config.WORLD_ID_RP_SIGNING_KEY) {

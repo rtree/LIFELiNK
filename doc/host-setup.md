@@ -13,9 +13,12 @@ Coding Agent はゲスト macOS(Apple Virtualization Framework 上の VM)で動�
 
 - ゲストとホストは同じ bridge (`10.211.55.0/24`)上にいる。ホストのアドレスは `10.211.55.2`、ユーザーは `araki`。
 - 接続はパスワードなし SSH（鍵ベース、`~/.ssh/authorized_keys` 設定済み）。
+- ゲストの `~/.ssh/config` には `beacon-host` alias が設定済み。LAN側のホストIPは `192.168.50.218` だが、VM bridge側の `10.211.55.2` を優先する。
 
 ```bash
 ssh araki@10.211.55.2
+# または
+ssh beacon-host
 ```
 
 - このアドレスは VM のネットワーク再構成で変わり得る。変わった場合はゲスト側で次を実行し、`en0` の `inet` に対応するホスト側 bridge アドレス（`bridge100`/`bridge101` の `.2` など）を探す。
@@ -133,6 +136,33 @@ adb shell am start -n com.rtree.LIFELiNK/.MainActivity
 ```
 
 以後、Android 側の実装が進んだら同じ手順（`git pull` → `./gradlew assembleDebug` → `adb install` → `adb shell am start`）で host 上のエミュレータで動作確認できる。検証後は `adb emu kill` でエミュレータを止め、resource を空けておく。
+
+## 2026-09-26 追加検証: ゲストbuildをhost emulatorで実行
+
+ゲスト内emulatorはnested HVFが使えず起動しない。ゲストでbuildしたAPKをSSH転送し、Apple SiliconホストのAVDへ直接入れる。
+
+```bash
+ssh beacon-host 'ANDROID_HOME="$HOME/Library/Android/sdk"; nohup "$ANDROID_HOME/emulator/emulator" -avd beacon_api36 -no-window -no-audio -no-snapshot-save > /tmp/lifelink-emulator.log 2>&1 < /dev/null &'
+ssh beacon-host 'ADB="$HOME/Library/Android/sdk/platform-tools/adb"; "$ADB" wait-for-device; until [[ "$("$ADB" shell getprop sys.boot_completed | tr -d "\r")" == "1" ]]; do :; done; "$ADB" devices -l'
+
+scp android/app/build/outputs/apk/debug/app-debug.apk beacon-host:/tmp/lifelink-debug.apk
+ssh beacon-host 'ADB="$HOME/Library/Android/sdk/platform-tools/adb"; "$ADB" install -r /tmp/lifelink-debug.apk; "$ADB" shell am start -W -n com.rtree.LIFELiNK/.MainActivity'
+```
+
+署名が異なる旧debug APKが残り `INSTALL_FAILED_UPDATE_INCOMPATIBLE` になった場合、テストAVD内だけ旧packageを削除してから再インストールする。
+
+```bash
+ssh beacon-host 'ADB="$HOME/Library/Android/sdk/platform-tools/adb"; "$ADB" uninstall com.rtree.LIFELiNK; "$ADB" install /tmp/lifelink-debug.apk'
+```
+
+実測結果:
+
+- `emulator-5554`、`sdk_gphone64_arm64`、API 36で起動。
+- LIFELiNK 0.1.0のMainActivityを85msで表示し、FATAL/ANRなし。
+- Credential ManagerからGoogleログインに成功し、Firebase Auth UID発行と「ログイン済み」表示を確認。
+- Cloud Run実行サービスアカウントへ`roles/firebaseauth.admin`を追加し、失効確認付きID token検証とcustom claims更新を可能にした。
+- World ID backend start APIはHTTP 200。connector URIはChromeへ開き、World App未導入時にGoogle Playの`org.world.id`へ誘導された。
+- Cloud Runは`lifelink-backend-00013-dq4`でReady。World ID proof完了はWorld Appを導入した物理端末で確認する。
 
 ## 既知の制約・未決事項
 

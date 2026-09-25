@@ -801,7 +801,7 @@ Android fact が Firestore へ一度だけ保存され `state/current` へ反映
 - Firebase Android app ID: `1:1023311564471:android:b4e6ad83334551f40e0732`
 - Cloud Run service: `lifelink-backend`、region: `asia-northeast1`
 - Cloud Run URL: `https://lifelink-backend-1023311564471.asia-northeast1.run.app`
-- Cloud Run revision: `lifelink-backend-00009-tzl`
+- Cloud Run revision: `lifelink-backend-00013-dq4`
 - Firestore database ID: `(default)`、region: `asia-northeast1`
 - Cloud Run service account: `lifelink-backend@ethglobaltokyo2026lifelink.iam.gserviceaccount.com`
 - Secret 名と version（値は記録しない）
