@@ -533,25 +533,35 @@ callee asks a detailed question
 
 P0 実装を壊さないための対応関係を明示する。
 
-- `emergency_events/{id}` は本節の `emergencySessions/{session_id}` の前身であり、P2 移行時は同じ id 体系（`emergency_event_id` ≒ `session_id`）を引き継ぐ。
+- `emergency_events/{id}` は本節の `users/{uid}/emergencySessions/{session_id}` の前身であり、P2 移行時は同じ id 体系（`emergency_event_id` ≒ `session_id`）を引き継ぐ。
 - `emergency_events/{id}/updates/{update_id}`（6a 章で拡張した `type`/`author_type` スキーマ）は、本節の `facts`（事実の正本）と `timeline`（表示・音声用の履歴）に分離される前身である。P2 移行時は `updates` の各レコードを `kind` に応じて `facts` と `timeline` へ振り分ける形で移行する。
 - P0 の `location_snapshot`/`initial_note` は本節の `state/current` の `location`/`address`/`user_notes` に相当する。P2 では `state/current` が Cloud Run transaction で維持する materialized view になる。
 - P0 は Realtime の conversation へ直接 `conversation.item.create` で位置・メモを注入している（5 章）。この経路自体は P2 でも残り、注入元が「Android からの生データ」から「Firestore `state/current`/`facts` 経由の選別済み情報」に変わる。
 
-### Firestore 構造（P2 到達点）
+**コレクション配置についての方針（2026-09-26）**: `emergency_events` は既に P0 でルート直下のコレクションとして実装・デプロイ済みであり（`backend/src/server.ts`/`voice.ts` が ID 直接参照で 5 箇所以上参照している）、今パスを変えると主線・実機検証中のコードを直接壊すので行わない。一方、P2 の `emergencySessions` はまだ何も実装されていないため、今のうちに「所有者（`users/{uid}`）の下にネストする」構成を採用する。理由:
+
+- 所有者判定が path segment（`uid`）で直接でき、Firestore rules から `resource.data.uid` を読む必要がなくなる（友人判定は引き続き `participant_uids` 配列が必要）。
+- ユーザー削除時に自分の全イベントを `users/{uid}` 以下だけ見ればよくなり、保持期間・削除導線（8a 章末尾）と相性がいい。
+
+### Firestore 構造（P2 到達点、`users/{uid}` 配下にネスト）
 
 ```text
-emergencySessions/{session_id}
-  state/current
-  facts/{fact_id}
-  timeline/{event_id}
-  delegations/{delegation_id}
-
-users/{uid}/state/location
-users/{uid}/emergencyContacts/{contact_id}
+users/{uid}
+  state/location
+  emergencyContacts/{contact_id}
+  emergencySessions/{session_id}
+    state/current
+    facts/{fact_id}
+    timeline/{event_id}
+    delegations/{delegation_id}
 ```
 
-#### `emergencySessions/{session_id}`
+実装上の注意点（ネストによる影響）:
+
+- Twilio の status callback や Media Stream の customParameter は、`session_id` のみでは `users/{uid}/emergencySessions/{session_id}` のパスを組み立てられない。backend が自分で発行する callback URL/customParameter に `owner_uid` も並記して渡し、受け取った側が直接パスを組み立てる（P0 のような `db.collection("emergency_events").doc(id)` 一発参照は P2 ではできない）。
+- 「自分の所有イベント一覧」は `users/{uid}/emergencySessions` への通常のクエリでよいが、「友人として共有されているイベント一覧（自分が owner ではない）」は `db.collectionGroup("emergencySessions").where("participant_uids", "array-contains", uid)` の collection group クエリになる。対応する合成インデックスと Firestore rules の `match /{path=**}/emergencySessions/{sessionId}` パターンが必要になる。
+
+#### `users/{uid}/emergencySessions/{session_id}`
 
 ```yaml
 session_id: string
@@ -570,7 +580,7 @@ schema_version: integer
 expires_at: timestamp
 ```
 
-`owner_uid` と `participant_uids`（6a 章の `participant_uids` と同じ考え方）で全 read/write を認可する。`trigger_event_id` を idempotency key にし、同じ押下から複数発信しない。電話番号は連絡先 document から解決し、クライアント入力を直接保存しない。status 更新と `last_sequence` 採番は transaction で行う。
+`owner_uid` は path の `uid` と冗長に一致させる（collection group クエリ・デバッグ・監査ログでの参照に使う）。read の認可は所有者判定を「path の `uid` == `request.auth.uid`」で行い、友人判定は引き続き `participant_uids` 配列で行う。`trigger_event_id` を idempotency key にし、同じ押下から複数発信しない。電話番号は連絡先 document から解決し、クライアント入力を直接保存しない。status 更新と `last_sequence` 採番は transaction で行う。
 
 #### `facts/{fact_id}`
 

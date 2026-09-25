@@ -68,40 +68,42 @@ service cloud.firestore {
       }
     }
 
-    // emergencySessions/{session_id} — P2 target schema, doc/plan.md 8a.
-    // Not yet written by backend; rules added ahead of implementation so the
-    // collection is never accidentally left on open/default rules.
-    match /emergencySessions/{sessionId} {
+    // users/{uid}/emergencySessions/{session_id} — P2 target schema, doc/plan.md 8a.
+    // Nested under the owner (2026-09-26 decision) so owner checks use the path
+    // segment directly instead of a stored field. Not yet written by backend;
+    // rules added ahead of implementation so the collection is never
+    // accidentally left on open/default rules.
+    match /users/{ownerUid}/emergencySessions/{sessionId} {
       allow read: if isSignedIn() &&
-        (request.auth.uid == resource.data.owner_uid ||
+        (request.auth.uid == ownerUid ||
          request.auth.uid in resource.data.participant_uids);
       allow write: if false;
 
       function canReadSession() {
         return isSignedIn() &&
-          (request.auth.uid == get(/databases/$(database)/documents/emergencySessions/$(sessionId)).data.owner_uid ||
-           request.auth.uid in get(/databases/$(database)/documents/emergencySessions/$(sessionId)).data.participant_uids);
+          (request.auth.uid == ownerUid ||
+           request.auth.uid in get(/databases/$(database)/documents/users/$(ownerUid)/emergencySessions/$(sessionId)).data.participant_uids);
       }
 
-      // emergencySessions/{session_id}/state/current
+      // users/{uid}/emergencySessions/{session_id}/state/current
       match /state/{stateId} {
         allow read: if canReadSession();
         allow write: if false;
       }
 
-      // emergencySessions/{session_id}/facts/{fact_id}
+      // users/{uid}/emergencySessions/{session_id}/facts/{fact_id}
       match /facts/{factId} {
         allow read: if canReadSession();
         allow write: if false;
       }
 
-      // emergencySessions/{session_id}/timeline/{event_id}
+      // users/{uid}/emergencySessions/{session_id}/timeline/{event_id}
       match /timeline/{eventId} {
         allow read: if canReadSession();
         allow write: if false;
       }
 
-      // emergencySessions/{session_id}/delegations/{delegation_id}
+      // users/{uid}/emergencySessions/{session_id}/delegations/{delegation_id}
       match /delegations/{delegationId} {
         allow read: if canReadSession();
         allow write: if false;
@@ -113,5 +115,10 @@ service cloud.firestore {
     match /world_id_nullifiers/{nullifierId} {
       allow read, write: if false;
     }
+
+    match /world_id_reverifications/{verificationId} {
+      allow read, write: if false;
+    }
+
   }
 }
