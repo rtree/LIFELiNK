@@ -47,6 +47,7 @@ import com.google.firebase.auth.GoogleAuthProvider
 import java.time.Instant
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
@@ -80,6 +81,7 @@ private fun SetupScreen() {
     var initialNote by remember { mutableStateOf("") }
     var armedAt by remember { mutableStateOf<Long?>(null) }
     var emergencyText by remember { mutableStateOf("緊急発信は待機中です") }
+    var activeEmergencyEventId by remember { mutableStateOf<String?>(null) }
 
     suspend fun captureAndSaveLocation() {
         runCatching {
@@ -89,6 +91,15 @@ private fun SetupScreen() {
         }.onSuccess { location ->
             currentLocation = location
             locationText = location.displayText()
+            activeEmergencyEventId?.let { eventId ->
+                runCatching {
+                    apiClient.sendLocationUpdate(eventId, location)
+                }.onSuccess {
+                    locationText += "\n通話中のAIへ位置更新を送信しました"
+                }.onFailure { error ->
+                    locationText += "\nAIへの位置更新失敗: ${error.userMessage()}"
+                }
+            }
         }.onFailure { error ->
             locationText = "位置保存失敗: ${error.userMessage()}"
         }
@@ -228,11 +239,28 @@ private fun SetupScreen() {
                         apiClient.createEmergencyEvent(
                             eventId = attempt.eventId,
                             contactId = selectedContactId,
+                            trigger = ScreenButtonEmergencyTrigger,
                             location = currentLocation,
                             initialNote = initialNote,
                         )
                     }.onSuccess { event ->
+                        activeEmergencyEventId = event.eventId
                         emergencyText = "発信状態: ${event.state}"
+                        while (event.state !in TERMINAL_EVENT_STATES) {
+                            delay(EVENT_STATUS_POLL_INTERVAL_MS)
+                            val latest = runCatching {
+                                apiClient.getEmergencyEvent(event.eventId)
+                            }.getOrElse { error ->
+                                emergencyText = "状態確認失敗（再試行します）: ${error.userMessage()}"
+                                continue
+                            }
+                            emergencyText = "発信状態: ${latest.state}"
+                            if (latest.state in TERMINAL_EVENT_STATES) {
+                                safetyGate.clear(event.eventId)
+                                activeEmergencyEventId = null
+                                break
+                            }
+                        }
                     }.onFailure { error ->
                         if (error is ApiException && error.statusCode in 400..499) {
                             safetyGate.clear(attempt.eventId)
@@ -243,6 +271,26 @@ private fun SetupScreen() {
             },
         ) {
             Text(if (armedAt == null) "緊急発信" else "発信を確定")
+        }
+        Button(
+            modifier = Modifier.fillMaxWidth(),
+            enabled = activeEmergencyEventId != null && initialNote.isNotBlank(),
+            onClick = {
+                val eventId = activeEmergencyEventId ?: return@Button
+                val note = initialNote
+                scope.launch {
+                    runCatching {
+                        apiClient.sendNoteUpdate(eventId, note)
+                    }.onSuccess {
+                        initialNote = ""
+                        emergencyText = "追加メモを通話中のAIへ送信しました"
+                    }.onFailure { error ->
+                        emergencyText = "追加メモ送信失敗: ${error.userMessage()}"
+                    }
+                }
+            },
+        ) {
+            Text("通話中メモを送信")
         }
         Spacer(Modifier.height(12.dp))
         Text("Backend: ${BuildConfig.BACKEND_URL}", style = MaterialTheme.typography.bodySmall)
@@ -340,3 +388,5 @@ private fun Throwable.userMessage(): String = when (this) {
 }
 
 private const val EMERGENCY_CONFIRM_WINDOW_MS = 10_000L
+private const val EVENT_STATUS_POLL_INTERVAL_MS = 2_000L
+private val TERMINAL_EVENT_STATES = setOf("completed", "failed")

@@ -20,8 +20,8 @@
 | P0-09 | IN PROGRESS | `EmergencyTrigger` と Android Safety gate を実装する | P0-04 | 永続event IDと二段階確認の画面ボタンは実装済み。残りはBLE共通interface化と実端末確認 |
 | P0-10 | IN PROGRESS | backend の冪等イベント作成と Twilio 発信を実装する | P0-06、P0-07、P0-08A、P0-09 | 連打・HTTP 再送でも実着信が一回だけ |
 | P0-11 | IN PROGRESS | Twilio Media Streams と OpenAI Realtime bridge を実装する | P0-08、P0-10 | 実通話で双方向会話が成立 |
-| P0-12 | TODO | 鮮度付き初回発話を実装する | P0-05、P0-11 | 住所、座標、精度、鮮度を順番どおり発話 |
-| P0-13 | TODO | Android の通話中メモ・位置更新を AI へ注入する | P0-11、P0-12 | 終話せず追加情報を音声で伝達可能 |
+| P0-12 | IN PROGRESS | 鮮度付き初回発話を実装する | P0-05、P0-11 | backendの構造化発話は実装済み。残りは実通話で住所、座標、精度、鮮度の順序を確認 |
+| P0-13 | IN PROGRESS | Android の通話中メモ・位置更新を AI へ注入する | P0-11、P0-12 | 認証・所有権・Call SID・状態検証、冪等保存、Realtime注入、Android送信は実装済み。残りは実通話確認 |
 | P0-14 | TODO | BLE Beacon 経路（専用 UUID/Major/Minor 広告、`BeaconReceiver`/Filter/PendingIntent、重複排除）を Safety gate へ接続する | P0-09、Beacon 機器 | 長押し一回が Android で一回の有効イベントになり、Beacon と画面ボタンが同じ発信経路を利用する |
 | P0-15 | TODO | MVP の失敗系と縦断フローを実端末で確認する | P0-10〜P0-14 | 権限拒否・通信断・外部 API 障害で二重発信せず、実通話証跡あり |
 

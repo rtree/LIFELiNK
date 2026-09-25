@@ -10,10 +10,12 @@ import { z } from "zod";
 import { authenticate, requireHumanVerification } from "./auth.js";
 import { config } from "./config.js";
 import {
+  injectEmergencyUpdate,
   isValidTwilioRequest,
   placeEmergencyCall,
   registerMediaBridge,
 } from "./voice.js";
+import { registerWorldIdRoutes } from "./worldid.js";
 
 if (getApps().length === 0) {
   initializeApp({
@@ -31,6 +33,8 @@ const app = Fastify({
 
 await app.register(formbody);
 await app.register(websocket);
+
+registerWorldIdRoutes(app, db);
 
 registerMediaBridge(app, async (eventId) => {
   const event = await db.collection("emergency_events").doc(eventId).get();
@@ -86,6 +90,30 @@ const emergencyEventSchema = z.object({
     .nullable(),
   initial_note: z.string().max(1000).nullable(),
 });
+
+const emergencyUpdateSchema = z.discriminatedUnion("type", [
+  z.object({
+    update_id: z.uuid(),
+    type: z.literal("note"),
+    text: z.string().trim().min(1).max(1000),
+  }),
+  z.object({
+    update_id: z.uuid(),
+    type: z.literal("location"),
+    location: locationSchema,
+  }),
+]);
+
+function formatEmergencyUpdate(
+  update: z.infer<typeof emergencyUpdateSchema>,
+): string {
+  if (update.type === "note") {
+    return `本人からの追加メモ: ${update.text}`;
+  }
+  const location = update.location;
+  const address = location.address ?? "住所不明";
+  return `本人の更新位置: ${address}、緯度${location.latitude}、経度${location.longitude}、精度約${Math.round(location.accuracy_m)}メートル。取得時刻${location.captured_at}`;
+}
 
 app.get("/health", async () => ({ status: "ok" }));
 
@@ -253,6 +281,89 @@ app.post(
       emergency_event_id: parsed.data.emergency_event_id,
       state: result.state,
       idempotent_replay: result.outcome === "existing",
+    });
+  },
+);
+
+app.post(
+  "/v1/emergency-events/:eventId/updates",
+  { preHandler: authenticate },
+  async (request, reply) => {
+    const parsed = emergencyUpdateSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: "invalid_emergency_update",
+        details: z.flattenError(parsed.error),
+      });
+    }
+
+    const { eventId } = request.params as { eventId: string };
+    const eventRef = db.collection("emergency_events").doc(eventId);
+    const event = await eventRef.get();
+    if (!event.exists || event.get("uid") !== request.user.uid) {
+      return reply.code(404).send({ error: "emergency_event_not_found" });
+    }
+    if (!event.get("twilio_call_sid")) {
+      return reply.code(409).send({ error: "call_not_started" });
+    }
+    if (!new Set(["dialing", "in_progress"]).has(event.get("state") as string)) {
+      return reply.code(409).send({ error: "call_not_active" });
+    }
+
+    const updateRef = eventRef.collection("updates").doc(parsed.data.update_id);
+    const existingUpdate = await updateRef.get();
+    if (existingUpdate.exists && existingUpdate.get("delivered_to_ai_at")) {
+      return reply.code(200).send({
+        update_id: parsed.data.update_id,
+        delivered_to_ai: true,
+        idempotent_replay: true,
+      });
+    }
+
+    const text = formatEmergencyUpdate(parsed.data);
+    if (!existingUpdate.exists) {
+      await updateRef.create({
+        type: parsed.data.type,
+        author_type: "owner",
+        author_uid: request.user.uid,
+        author_name: request.user.name ?? null,
+        text,
+        mentioned_uids: [],
+        payload:
+          parsed.data.type === "location" ? parsed.data.location : { text: parsed.data.text },
+        created_at: FieldValue.serverTimestamp(),
+        delivered_to_ai_at: null,
+      });
+    }
+
+    if (!injectEmergencyUpdate(eventId, text)) {
+      return reply.code(409).send({
+        error: "realtime_session_not_ready",
+        update_id: parsed.data.update_id,
+      });
+    }
+    await updateRef.update({ delivered_to_ai_at: FieldValue.serverTimestamp() });
+    return reply.code(202).send({
+      update_id: parsed.data.update_id,
+      delivered_to_ai: true,
+      idempotent_replay: existingUpdate.exists,
+    });
+  },
+);
+
+app.get(
+  "/v1/emergency-events/:eventId",
+  { preHandler: authenticate },
+  async (request, reply) => {
+    const { eventId } = request.params as { eventId: string };
+    const event = await db.collection("emergency_events").doc(eventId).get();
+    if (!event.exists || event.get("uid") !== request.user.uid) {
+      return reply.code(404).send({ error: "emergency_event_not_found" });
+    }
+    return reply.send({
+      emergency_event_id: event.id,
+      state: event.get("state") as string,
+      failure_code: (event.get("failure_code") as string | null) ?? null,
     });
   },
 );

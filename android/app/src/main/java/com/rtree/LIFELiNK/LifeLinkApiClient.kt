@@ -3,6 +3,7 @@ package com.rtree.LIFELiNK
 import com.google.firebase.auth.FirebaseAuth
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
@@ -36,6 +37,12 @@ data class EmergencyEventResult(
     val idempotentReplay: Boolean,
 )
 
+data class EmergencyEventStatus(
+    val eventId: String,
+    val state: String,
+    val failureCode: String?,
+)
+
 class ApiException(
     val statusCode: Int,
     val errorCode: String,
@@ -63,6 +70,7 @@ class LifeLinkApiClient(
     suspend fun createEmergencyEvent(
         eventId: String,
         contactId: String,
+        trigger: EmergencyTrigger,
         location: LocationSnapshot?,
         initialNote: String?,
     ): EmergencyEventResult {
@@ -71,7 +79,7 @@ class LifeLinkApiClient(
             JSONObject()
                 .put("emergency_event_id", eventId)
                 .put("contact_id", contactId)
-                .put("trigger_type", "screen_button")
+                .put("trigger_type", trigger.wireValue)
                 .put("location_snapshot", location?.toJson() ?: JSONObject.NULL)
                 .put("initial_note", initialNote?.takeIf(String::isNotBlank) ?: JSONObject.NULL),
         )
@@ -82,7 +90,44 @@ class LifeLinkApiClient(
         )
     }
 
+    suspend fun sendNoteUpdate(eventId: String, text: String) {
+        post(
+            "/v1/emergency-events/$eventId/updates",
+            JSONObject()
+                .put("update_id", UUID.randomUUID().toString())
+                .put("type", "note")
+                .put("text", text),
+        )
+    }
+
+    suspend fun sendLocationUpdate(eventId: String, location: LocationSnapshot) {
+        post(
+            "/v1/emergency-events/$eventId/updates",
+            JSONObject()
+                .put("update_id", UUID.randomUUID().toString())
+                .put("type", "location")
+                .put("location", location.toJson()),
+        )
+    }
+
+    suspend fun getEmergencyEvent(eventId: String): EmergencyEventStatus {
+        val response = request("GET", "/v1/emergency-events/$eventId")
+        return EmergencyEventStatus(
+            eventId = response.getString("emergency_event_id"),
+            state = response.getString("state"),
+            failureCode = response.optString("failure_code").takeIf(String::isNotBlank),
+        )
+    }
+
     private suspend fun post(path: String, body: JSONObject): JSONObject {
+        return request("POST", path, body)
+    }
+
+    private suspend fun request(
+        method: String,
+        path: String,
+        body: JSONObject? = null,
+    ): JSONObject {
         val user = FirebaseAuth.getInstance().currentUser
             ?: throw IllegalStateException("Google login is required")
         val idToken = user.getIdToken(false).await().token
@@ -92,14 +137,16 @@ class LifeLinkApiClient(
             val connection = URL("${backendUrl.trimEnd('/')}$path")
                 .openConnection() as HttpURLConnection
             try {
-                connection.requestMethod = "POST"
+                connection.requestMethod = method
                 connection.connectTimeout = 10_000
                 connection.readTimeout = 65_000
-                connection.doOutput = true
                 connection.setRequestProperty("Authorization", "Bearer $idToken")
-                connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
-                connection.outputStream.bufferedWriter(Charsets.UTF_8).use { writer ->
-                    writer.write(body.toString())
+                if (body != null) {
+                    connection.doOutput = true
+                    connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                    connection.outputStream.bufferedWriter(Charsets.UTF_8).use { writer ->
+                        writer.write(body.toString())
+                    }
                 }
 
                 val statusCode = connection.responseCode

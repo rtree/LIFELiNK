@@ -26,6 +26,35 @@ type TwilioMediaMessage = {
   media: { payload: string };
 };
 
+const activeRealtimeSessions = new Map<string, WebSocket>();
+
+export function injectEmergencyUpdate(
+  emergencyEventId: string,
+  text: string,
+): boolean {
+  const socket = activeRealtimeSessions.get(emergencyEventId);
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    return false;
+  }
+  socket.send(
+    JSON.stringify({
+      type: "conversation.item.create",
+      item: {
+        type: "message",
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: `緊急連絡アプリから新しい情報です。相手に簡潔に伝えてください。${text}`,
+          },
+        ],
+      },
+    }),
+  );
+  socket.send(JSON.stringify({ type: "response.create" }));
+  return true;
+}
+
 function requireVoiceConfig() {
   if (
     !config.TWILIO_ACCOUNT_SID ||
@@ -118,6 +147,25 @@ export function registerMediaBridge(
     );
     let streamSid: string | null = null;
     let emergencyEventId: string | null = null;
+    let pendingInitialMessage: string | null = null;
+
+    const sendInitialMessage = () => {
+      if (!pendingInitialMessage || openAiSocket.readyState !== WebSocket.OPEN) {
+        return;
+      }
+      openAiSocket.send(
+        JSON.stringify({
+          type: "conversation.item.create",
+          item: {
+            type: "message",
+            role: "user",
+            content: [{ type: "input_text", text: pendingInitialMessage }],
+          },
+        }),
+      );
+      openAiSocket.send(JSON.stringify({ type: "response.create" }));
+      pendingInitialMessage = null;
+    };
 
     openAiSocket.on("open", () => {
       openAiSocket.send(
@@ -143,6 +191,10 @@ export function registerMediaBridge(
           },
         }),
       );
+      if (emergencyEventId) {
+        activeRealtimeSessions.set(emergencyEventId, openAiSocket);
+      }
+      sendInitialMessage();
     });
 
     twilioSocket.on("message", async (rawMessage: RawData) => {
@@ -165,17 +217,11 @@ export function registerMediaBridge(
           return;
         }
         const initialMessage = buildInitialMessage(context);
-        openAiSocket.send(
-          JSON.stringify({
-            type: "conversation.item.create",
-            item: {
-              type: "message",
-              role: "user",
-              content: [{ type: "input_text", text: `次の文章をそのまま最初に読み上げてください。${initialMessage}` }],
-            },
-          }),
-        );
-        openAiSocket.send(JSON.stringify({ type: "response.create" }));
+        pendingInitialMessage = `次の文章をそのまま最初に読み上げてください。${initialMessage}`;
+        if (openAiSocket.readyState === WebSocket.OPEN) {
+          activeRealtimeSessions.set(emergencyEventId, openAiSocket);
+        }
+        sendInitialMessage();
       }
 
       if (message.event === "media" && openAiSocket.readyState === WebSocket.OPEN) {
@@ -212,6 +258,12 @@ export function registerMediaBridge(
     });
 
     const closeBoth = () => {
+      if (
+        emergencyEventId &&
+        activeRealtimeSessions.get(emergencyEventId) === openAiSocket
+      ) {
+        activeRealtimeSessions.delete(emergencyEventId);
+      }
       if (twilioSocket.readyState === WebSocket.OPEN) {
         twilioSocket.close();
       }
