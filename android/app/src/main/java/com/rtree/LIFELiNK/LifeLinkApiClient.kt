@@ -54,6 +54,16 @@ data class EmergencyEventStatus(
     val failureCode: String?,
 )
 
+data class WorldIdFlow(
+    val flowId: String,
+    val connectorUri: String,
+)
+
+data class WorldIdFlowStatus(
+    val state: String,
+    val error: String?,
+)
+
 class ApiException(
     val statusCode: Int,
     val errorCode: String,
@@ -127,6 +137,22 @@ class LifeLinkApiClient(
             eventId = response.getString("emergency_event_id"),
             state = response.getString("state"),
             failureCode = response.optString("failure_code").takeIf(String::isNotBlank),
+        )
+    }
+
+    suspend fun startWorldIdFlow(): WorldIdFlow {
+        val response = post("/v1/world-id/start", JSONObject())
+        return WorldIdFlow(
+            flowId = response.getString("flow_id"),
+            connectorUri = response.getString("connector_uri"),
+        )
+    }
+
+    suspend fun getWorldIdFlowStatus(flowId: String): WorldIdFlowStatus {
+        val response = request("GET", "/v1/world-id/status/$flowId")
+        return WorldIdFlowStatus(
+            state = response.getString("state"),
+            error = response.optString("error").takeIf(String::isNotBlank),
         )
     }
 

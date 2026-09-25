@@ -2,8 +2,10 @@ package com.rtree.LIFELiNK
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Geocoder
+import android.net.Uri
 import android.os.Bundle
 import android.os.Build
 import android.os.SystemClock
@@ -74,6 +76,7 @@ private fun SetupScreen() {
     val safetyGate = remember { EmergencySafetyGate(context) }
     val emergencyPreferences = remember { EmergencyPreferences(context) }
     var status by remember { mutableStateOf("Googleでログインしてください") }
+    var worldIdStatus by remember { mutableStateOf("World ID人間証明は未完了です") }
     var locationText by remember { mutableStateOf("位置情報はまだ保存されていません") }
     var currentLocation by remember { mutableStateOf(emergencyPreferences.location) }
     var contactName by remember { mutableStateOf("") }
@@ -162,6 +165,44 @@ private fun SetupScreen() {
             },
         ) {
             Text("Googleでログイン")
+        }
+        Text(worldIdStatus)
+        Button(
+            modifier = Modifier.fillMaxWidth(),
+            enabled = FirebaseAuth.getInstance().currentUser != null,
+            onClick = {
+                scope.launch {
+                    runCatching {
+                        val flow = apiClient.startWorldIdFlow()
+                        context.startActivity(
+                            Intent(Intent.ACTION_VIEW, Uri.parse(flow.connectorUri)),
+                        )
+                        worldIdStatus = "World Appで人間証明を完了してください"
+                        while (true) {
+                            delay(WORLD_ID_STATUS_POLL_INTERVAL_MS)
+                            val flowStatus = apiClient.getWorldIdFlowStatus(flow.flowId)
+                            when (flowStatus.state) {
+                                "verified" -> {
+                                    FirebaseAuth.getInstance().currentUser
+                                        ?.getIdToken(true)
+                                        ?.await()
+                                    worldIdStatus = "World ID人間証明済み"
+                                    break
+                                }
+                                "failed" -> error(flowStatus.error ?: "World ID verification failed")
+                                "waiting_for_connection" ->
+                                    worldIdStatus = "World Appの接続を待っています"
+                                "awaiting_confirmation" ->
+                                    worldIdStatus = "World Appで確認中です"
+                            }
+                        }
+                    }.onFailure { error ->
+                        worldIdStatus = "World ID証明失敗: ${error.userMessage()}"
+                    }
+                }
+            },
+        ) {
+            Text("World IDで人間証明")
         }
         Spacer(Modifier.height(12.dp))
         Text(locationText)
@@ -435,4 +476,5 @@ private fun Throwable.userMessage(): String = when (this) {
 
 private const val EMERGENCY_CONFIRM_WINDOW_MS = 10_000L
 private const val EVENT_STATUS_POLL_INTERVAL_MS = 2_000L
+private const val WORLD_ID_STATUS_POLL_INTERVAL_MS = 2_000L
 private val TERMINAL_EVENT_STATES = setOf("completed", "failed")
