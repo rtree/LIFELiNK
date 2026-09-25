@@ -21,7 +21,7 @@
 | P0-11 | TODO | Twilio Media Streams と OpenAI Realtime bridge を実装する | P0-08、P0-10 | 実通話で双方向会話が成立 |
 | P0-12 | TODO | 鮮度付き初回発話を実装する | P0-05、P0-11 | 住所、座標、精度、鮮度を順番どおり発話 |
 | P0-13 | TODO | Android の通話中メモ・位置更新を AI へ注入する | P0-11、P0-12 | 終話せず追加情報を音声で伝達可能 |
-| P0-14 | TODO | 既存 BLE イベントを Safety gate へ接続する | P0-09、利用 BLE 仕様 | BLE と画面ボタンが同じ発信経路を利用 |
+| P0-14 | TODO | BLE Beacon 経路（専用 UUID/Major/Minor 広告、`BeaconReceiver`/Filter/PendingIntent、重複排除）を Safety gate へ接続する | P0-09、Beacon 機器 | 長押し一回が Android で一回の有効イベントになり、Beacon と画面ボタンが同じ発信経路を利用する |
 | P0-15 | TODO | MVP の失敗系と縦断フローを実端末で確認する | P0-10〜P0-14 | 権限拒否・通信断・外部 API 障害で二重発信せず、実通話証跡あり |
 
 ## P0.5: 先回り設計（主線をブロックしない）
@@ -43,7 +43,7 @@
 | P1-05 | TODO | 友人コメントを `conversation.item.create` + `response.create` で進行中の Realtime セッションへ注入する | P1-04 | 通話を切らずに友人コメントの内容が相手へ音声で伝わる |
 | P1-06 | TODO | Discord 風 UI（友人登録画面、招待コード入力、通話履歴・ライブフィード画面、コメント入力欄）を実装する | P1-02〜P1-05 | 自分と共有されたイベントを時系列表示し、通話中にコメント投稿できる |
 | P1-07 | TODO | Android 周辺音声の扱いを設計・実装する | P0-15、同意・法務判断 | 明示同意と状態表示のもとで音声を通話へ追加可能 |
-| P1-08 | TODO | GATT ボタンとロック中対応を実装する | P0-14、端末・Play 制約検証 | 対象端末のロック中に実イベントが Safety gate へ到達 |
+| P1-08 | TODO | GATT 経路（XIAO nRF52840 Peripheral、Android Central、Notify/ACK、epoch/eventId 検証）を実装し `trigger_source: gatt` として Safety gate へ接続する | P0-14 完了（Beacon 完動）、`firmware/xiao_gatt_button/`、`app/.../gatt_experiment/` | `CONNECTED -> SUBSCRIBED -> READY` を維持し、長押し一回が Notify 一回・受信一回・ACK 一回になる。重複・過去 eventId・epoch 変更・切断後の古いイベントが発信候補にならず、GATT 不通時は Beacon 経路にフォールバックする |
 
 ## 次のアクション
 

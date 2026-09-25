@@ -167,6 +167,7 @@ flowchart LR
 - `uid`
 - `contact_id`
 - `trigger_type`: `screen_button` または `ble`
+- `trigger_source`: `trigger_type` が `ble` のときのみ `beacon` または `gatt`
 - `state`: `accepted`、`dialing`、`in_progress`、`completed`、`failed`
 - `location_snapshot`
 - `initial_note`
@@ -224,6 +225,68 @@ P0 実装は `type: note` と `type: location` だけを書き込めばよく、
 - `updates` サブコレクションの read は親ドキュメントの `participant_uids` を 1 回 `get()` して判定する（rules のネストした `get()` は増やさない）。
 - `friend_comment` の create は `request.auth.uid in participant_uids` かつ `request.resource.data.author_uid == request.auth.uid` を要求する。
 - 友人の同時 listener 数が増えると読み取り課金が増える。MVP 後の規模次第でページングや要約表示への切り替えを検討する（数名規模の同時視聴を前提にした設計）。
+
+## 6b. BLE トリガー設計（Beacon → GATT の二段階、実装は主線完了後）
+
+物理ボタン機器の準備は完了済み。実装順序は主線（画面ボタンでの実通話成立）を止めないが、機器仕様は確定しているためここに設計を残す。
+
+- 導入順序は 2 段階固定とする。1. まず Beacon 経路を実装する。2. 主線と Beacon が完動してから GATT 経路を追加する。
+- BLE 層は物理ボタンの長押しを一回の新規イベントとして Android へ届けるだけの役割に限定する。電話番号、位置情報、認証情報、Firebase/API の秘密情報は BLE payload に一切含めない。
+- Beacon・GATT のどちらも Android 側で共通の `EmergencyTrigger` へ正規化し、`emergency_events.trigger_type = ble` と `trigger_source`（`beacon` または `gatt`）を設定してから同じ Safety gate を通す。
+
+### Beacon 経路（予備トリガー）
+
+Beacon は接続を維持できない場合の予備トリガーとして使う。
+
+```text
+長押し -> 専用 UUID/Major/Minor を広告
+  -> Android の厳密 Filter/PendingIntent で受信
+  -> BeaconReceiver で ID・鮮度・重複を検証
+  -> Safety gate
+```
+
+- Beacon 広告にはイベントごとの ACK がないため、同じ広告の複数受信は一回の押下として重複排除する。
+- 画面 ON で確実に動く退避経路として保持し、ロック中の配送保証には使わない（ロック中の確実な配送は GATT 側の役割）。
+- 使用箇所は `core` の iBeacon parser / `EventGate` と、`bluetooth` の `BeaconReceiver` / Filter / PendingIntent とする。
+
+### GATT 経路（主経路、Beacon 完動後に追加）
+
+GATT Notify を物理ボタンの主経路とする。XIAO nRF52840 が Peripheral/GATT server、Android が Central/GATT client となる。
+
+```text
+準備: Android scan -> connect -> service discovery -> Notify 購読 -> READY
+押下: XIAO 長押し判定 -> Notify(epoch, eventId, action) -> Android 検証 -> ACK
+```
+
+- Android はボタン押下前から接続と Notify 購読を維持する。押下後に scan や connect を開始しない。
+- Notify は 17 byte、ACK は 16 byte で、どちらも big-endian とする。
+  - Notify: `epoch`（8 byte）、`eventId`（8 byte）、`action`（1 byte、`1 = LONG_PRESS`）
+  - ACK: `epoch`（8 byte）、`eventId`（8 byte）
+- `epoch` は boot ごとに変更し、`eventId` は同じ epoch 内で単調増加させる。Android は Notify 受信時刻をイベント時刻として使い、有効な Notify へ同じ epoch/eventId を ACK する。ACK は受信確認であり、電話発信成功を意味しない。
+- epoch 不一致、重複、過去 eventId、古いイベント、未定義 action、切断中の押下、再起動前のイベントは発信候補にしない。
+- XIAO 側は GPIO を `INPUT_PULLUP` で読み、長押し判定も XIAO 側で行う。押しっぱなしでも `LONG_PRESS` は一回だけ生成し、Android が Notify 購読済みの場合だけ送信する。ACK 済みイベントは再通知しない。
+- firmware は `firmware/xiao_gatt_button/`、Android の GATT 契約は `app/.../gatt_experiment/` に置く。
+
+### Android から通話への接続（Beacon/GATT 共通）
+
+```text
+BLE event
+  -> 重複・鮮度検証
+  -> dry-run / arm / cooldown / consent 確認
+  -> 最新位置保存
+  -> 登録済み contact_id で backend call session 作成
+```
+
+BLE 層から電話 API や Firebase を直接呼ばない。Android Controller が Safety gate を通過したイベントだけを backend へ渡す。
+
+### 完了条件
+
+- Beacon: 長押し一回が Android で一回の有効イベントになる。
+- GATT: `CONNECTED -> SUBSCRIBED -> READY` を維持し、長押し一回が Notify 一回、受信一回、ACK 一回になる。
+- 重複、過去 eventId、epoch 変更、切断後の古いイベントが発信候補にならない。
+- dry-run、15 分一回の arm、60 秒 cooldown、再起動後 disarm を維持する。
+- GATT が使えない場合も Beacon 経路を利用できる。
+- 使用する XIAO nRF52840 と Beacon 機器は技適確認済み。実機の対象型番を取り違えない。
 
 ## 7. Safety gate と一回だけの発信
 
@@ -356,22 +419,29 @@ P0 実装は `type: note` と `type: location` だけを書き込めばよく、
 - Android からメモと新位置をイベントへ追加し、進行中 Realtime session へ注入する。
 - 完了条件: 通話を切らずに追加メモまたは位置更新が相手へ音声で伝わる。
 
-### Phase 5: BLE 接続と失敗系
+### Phase 5: BLE Beacon 接続と失敗系
 
-- 既存 BLE イベントを同じ Safety gate へ接続する。
+- Beacon 経路（6b 章）を同じ Safety gate へ接続する。`trigger_type: ble`、`trigger_source: beacon` を設定する。
 - 権限拒否、位置取得失敗、住所取得失敗、通信断、Twilio/OpenAI 障害を確認する。
-- 完了条件: 失敗時に二重発信せず、Android に状態と次の操作が表示される。
+- 完了条件: 長押し一回が Android で一回の有効イベントになり、失敗時に二重発信せず、Android に状態と次の操作が表示される。
 
 ### Phase 6: 延期機能
 
-- World ID / IDKit、友人共有、Discord 風履歴、周辺音声、GATT ロック中対応を優先順位順に実装する。ただし発信 API には最初から `human_verified` の認可境界を用意し、World ID 統合後は証明済みユーザーだけが発信できるようにする。
+- World ID / IDKit、友人共有、Discord 風履歴、周辺音声を優先順位順に実装する。ただし発信 API には最初から `human_verified` の認可境界を用意し、World ID 統合後は証明済みユーザーだけが発信できるようにする。
 - World ID は `world-id-idkit` Skill と Developer Portal MCP を使い、Secret Manager の保存先を準備してから RP signing key を生成する。
+
+### Phase 7: GATT 移行（Beacon 完動後）
+
+- GATT 経路（6b 章）を追加し、`trigger_source: gatt` を Safety gate へ接続する。
+- `CONNECTED -> SUBSCRIBED -> READY` の接続維持、epoch/eventId によるイベント検証、ACK 処理を実装する。
+- 完了条件: 6b 章の完了条件をすべて満たし、GATT が使えない場合は Beacon 経路にフォールバックする。
 
 ## 12. 重要な制約と判断
 
 - Twilio Programmable Voice を公的緊急番号への発信には使わない。
 - Trial の Twilio アカウントは発信先が検証済み番号に制限される可能性がある。実通話前に account と発信先地域の状態を確認する。
-- Android の Background location とロック中 GATT は権限・Foreground Service・Google Play 審査の負担が大きいため MVP から外す。
+- Android の Background location は権限・Foreground Service・Google Play 審査の負担が大きいため MVP から外す。GATT 常時接続はロック中配送を目的とするため Background location とは別の制約（6b 章）で扱う。
+- BLE payload には電話番号・位置情報・認証情報・秘密情報を含めない。BLE はイベント通知専用とし、位置情報の収集と発信判断は Android Controller が Safety gate 通過後に行う。
 - 位置情報、電話番号、会話内容は機微情報として扱い、保存量と保持期間を最小化する。MVP では音声を録音しない。
 - AI が誤った位置を作らないよう、位置情報の文面は backend が生成する。
 - 通話相手には冒頭で AI による自動電話であることを明示する。
