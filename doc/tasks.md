@@ -11,10 +11,10 @@
 | P0-01 | DONE | Android package name、GCP project、region、ログイン方式を決定する | 人間の意思決定 | 決定を `doc/plan.md` に反映済み |
 | P0-02 | DONE | GCP/Firebase project と billing を利用可能にする | P0-01、人間の課金設定 | Agent が対象 project を CLI で参照可能 |
 | P0-03 | DONE | Firestore、Cloud Run、Secret Manager、service account、必要 API を構成する | P0-02 | 最小権限の実行環境と空の backend がデプロイ済み |
-| P0-04 | IN PROGRESS | Firebase Android app、Authentication、`google-services.json` を構成する | P0-02 | Google providerとOAuth clientの組み込み・debug buildは完了。残りは実端末からのログイン成功 |
+| P0-04 | IN PROGRESS | Firebase Android app、Authentication、`google-services.json` を構成する | P0-02 | Google providerとOAuth clientの組み込み・debug buildは完了。2026-09-25: Identity Toolkit API (`defaultSupportedIdpConfigs/google.com`) で `enabled: true` を再確認済み。残りは実端末からのログイン成功 |
 | P0-05 | TODO | Android の位置取得・保存 UI と backend API を実装する | P0-03、P0-04 | 実端末の座標・精度・時刻・住所を再取得可能 |
 | P0-06 | TODO | 緊急連絡先登録と `contact_id` 解決を実装する | P0-03、P0-04 | E.164 番号を登録し、所有者検証付きで解決可能 |
-| P0-07 | IN PROGRESS | Twilio account、発信番号、テスト受電番号を準備する | 人間の契約・同意 | Agent が Secret Manager 経由でテスト発信可能 |
+| P0-07 | DONE | Twilio account、発信番号、テスト受電番号を準備する | 人間の契約・同意 | 2026-09-25: Secret Manager 経由で Twilio Account API を確認。`status: active`、`type: Full`（trial 制限なし）、残高 1814.52 JPY、`key-twilio-from-number` が voice 対応の in-use 番号であることを確認済み。Cloud Run `lifelink-backend` に 4 secret（sid/authToken/from-number/openai）が正しく bind 済み。実際のテスト発信自体は発信先の事前同意取得後に P0-15 で実施する |
 | P0-08 | DONE | OpenAI API key を Secret Manager から Cloud Run へ割り当てる | P0-03 | Cloud Run のみが Secret を参照可能 |
 | P0-08A | BLOCKED | World ID app、RP、action、proof検証と発信認可を実装する | 人間によるRP署名鍵のSecret Manager直接保存 | Googleログイン済みかつ人間性証明済みユーザーだけが発信可能 |
 | P0-09 | TODO | `EmergencyTrigger` と Android Safety gate を実装する | P0-04 | 画面ボタンが一意な `emergency_event_id` を生成 |
@@ -54,7 +54,7 @@
 
 ## 次のアクション
 
-Google provider、OAuth client、Twilio account、発信番号、OpenAI Secret、Cloud Run音声bridgeは構成済み。主線の外部ボトルネックはテスト受電番号と受電者の同意である。
+Google provider、OAuth client、Twilio account、発信番号、OpenAI Secret、Cloud Run音声bridgeは構成済み。2026-09-25 にTwilio(`status: active`/`type: Full`)とGoogle provider(`enabled: true`)を Secret Manager 経由のAPI呼び出しで実測確認済み。主線の外部ボトルネックはテスト受電番号の受電者からの事前同意である。
 
 1. Android 実端末でGoogleログインを確認し、P0-04を完了する。
 2. P0-05（位置保存）、P0-06（連絡先登録）、P0-09（Safety gate）を並列で進める。
