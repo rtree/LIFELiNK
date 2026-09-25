@@ -16,7 +16,7 @@
 | P0-06 | IN PROGRESS | 緊急連絡先登録と `contact_id` 解決を実装する | P0-03、P0-04 | Android登録UIと所有者配下へのbackend保存は実装済み。残りは実端末確認 |
 | P0-07 | DONE | Twilio account、発信番号、テスト受電番号を準備する | 人間の契約・同意 | 2026-09-25: Secret Manager 経由で Twilio Account API を確認。`status: active`、`type: Full`（trial 制限なし）、残高 1814.52 JPY、`key-twilio-from-number` が voice 対応の in-use 番号であることを確認済み。Cloud Run `lifelink-backend` に 4 secret（sid/authToken/from-number/openai）が正しく bind 済み。実際のテスト発信自体は発信先の事前同意取得後に P0-15 で実施する |
 | P0-08 | DONE | OpenAI API key を Secret Manager から Cloud Run へ割り当てる | P0-03 | Cloud Run のみが Secret を参照可能 |
-| P0-08A | IN PROGRESS | World ID app、RP、action、proof検証と発信認可を実装する | RP登録・署名鍵のSecret Manager保存・Cloud Run割当は完了 | 2026-09-26: backend側実装完了（`backend/src/worldid.ts`: `POST /v1/world-id/sign`でRP署名発行、`POST /v1/world-id/verify`で`/api/v4/verify/{rp_id}`へproofをそのまま転送し、Firestore `create()`でnullifier再利用を拒否し、成功時にFirebase custom claim `human_verified: true`を設定）。production action `verify-emergency-caller`（`action_v4_5706099fb9c9a19bd9ee0ed72efab550`）をDeveloper Portal MCPで作成しregistered確認済み。typecheck/build green。Cloud Run revision `lifelink-backend-00011-l7h`に`WORLD_ID_*`環境変数を確認し、`/v1/world-id/sign`・`/v1/world-id/verify`が本番で401（認証必須、404ではない）を返すことを確認済み＝デプロイ完了。残りは (1) Android側でIDKit widgetを開き`/v1/world-id/sign`→IDKit→`/v1/world-id/verify`を呼ぶ実装、(2) 検証成功後にAndroidが`getIdToken(true)`でトークンを強制更新して`human_verified`クレームを反映すること |
+| P0-08A | IN PROGRESS | World ID app、RP、action、proof検証と発信認可を実装する | RP登録・署名鍵のSecret Manager保存・Cloud Run割当は完了 | 2026-09-26: backend側実装完了（`backend/src/worldid.ts`: `POST /v1/world-id/sign`でRP署名発行、`POST /v1/world-id/verify`で`/api/v4/verify/{rp_id}`へproofをそのまま転送し、Firestore `create()`でnullifier再利用を拒否し、成功時にFirebase custom claim `human_verified: true`を設定）。production action `verify-emergency-caller`（`action_v4_5706099fb9c9a19bd9ee0ed72efab550`）をDeveloper Portal MCPで作成しregistered確認済み。typecheck/build green。Cloud Run revision `lifelink-backend-00011-l7h`に`WORLD_ID_*`環境変数を確認し、`/v1/world-id/sign`・`/v1/world-id/verify`が本番で401（認証必須、404ではない）を返すことを確認済み＝デプロイ完了。同日中に `backend-driven` フローへ拡張され（`POST /v1/world-id/start` が `connector_uri` を返し、`GET /v1/world-id/status/:flowId` でpollする方式）、Android側のIDKit呼び出し・`getIdToken(true)`によるクレーム反映も実装済み（revision `lifelink-backend-00012-pcx`で稼働、typecheck/build再確認済み）。**既知の軽微なリスク**: `pendingRequests` がCloud Runプロセスのin-memory `Map`のため、min-instances未設定でscale-to-zeroが起きるとflowが失われ`world_id_flow_not_found`になり得る。実機テストで再現したら `--min-instances=1` を検討するか、pending stateをFirestoreへ逃がす |
 | P0-09 | IN PROGRESS | `EmergencyTrigger` と Android Safety gate を実装する | P0-04 | 永続event IDと二段階確認の画面ボタンは実装済み。残りはBLE共通interface化と実端末確認 |
 | P0-10 | IN PROGRESS | backend の冪等イベント作成と Twilio 発信を実装する | P0-06、P0-07、P0-08A、P0-09 | 連打・HTTP 再送でも実着信が一回だけ |
 | P0-11 | IN PROGRESS | Twilio Media Streams と OpenAI Realtime bridge を実装する | P0-08、P0-10 | 実通話で双方向会話が成立 |
@@ -76,9 +76,10 @@
 
 ## 次のアクション
 
-Google provider、OAuth client、Twilio account、発信番号、OpenAI Secret、Cloud Run音声bridgeは構成済み。2026-09-25 にTwilio(`status: active`/`type: Full`)とGoogle provider(`enabled: true`)を Secret Manager 経由のAPI呼び出しで実測確認済み。主線の外部ボトルネックはテスト受電番号の受電者からの事前同意である。
+Google provider、OAuth client、Twilio account、発信番号、OpenAI Secret、Cloud Run音声bridgeは構成済み。2026-09-25 にTwilio(`status: active`/`type: Full`)とGoogle provider(`enabled: true`)を Secret Manager 経由のAPI呼び出しで実測確認済み。主線の外部ボトルネックはテスト受電番号の受電者からの事前同意である。2026-09-26: GCP billing budgets（Monthly 2,000円/2nd limit 20,000円/Alert 10,000円、billing account 全体に適用）が既に設定済みであることを確認し、Twilio/OpenAI Realtimeの誤課金に対する安全網はすでにあると判断した（追加設定は不要）。
 
 1. Android 実端末でGoogleログインを確認し、P0-04を完了する。
 2. P0-05（位置保存）、P0-06（連絡先登録）、P0-09（Safety gate）を並列で進める。
 3. 同意済みテスト受電番号をアプリへ登録し、P0-10〜P0-13の実通話を縦断確認する。
 4. GATT（P1-08〜P1-15）は Beacon（P0-14）が主線完了後に完動してから着手する。着手前に P1-08 の決定事項を先に固める。
+5. P0-15 に入ったら、World ID の `pendingRequests` in-memory Map（P0-08A 参照）がscale-to-zeroで失われないか実機で確認する。
