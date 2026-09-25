@@ -92,8 +92,10 @@ flowchart LR
 
 ### Android
 
+- Application ID / package name は `com.rtree.LIFELiNK` とする。Android と Firebase の仕様上は大文字を利用できるため、ユーザー指定を優先する。一度公開すると変更できない識別子として扱う。
 - Kotlin と Jetpack Compose を第一候補とする。
-- Firebase Authentication でログインし、ID token を backend の Bearer token として送る。
+- Firebase Authentication の Google ログインを使い、ID token を backend の Bearer token として送る。
+- Google ログインはアプリへの認証、World ID は緊急発信権限の人間性証明として分離する。World ID 未証明でも初期設定はできるが、発信 API は利用できない。
 - MVP は Foreground location のみを要求する。継続的な Background location は要求しない。
 - ボタンと BLE は同じ `EmergencyTrigger` インターフェースへ変換し、必ず同じ Safety gate を通す。
 - 位置スナップショットは `latitude`、`longitude`、`accuracy_m`、`captured_at`、`address`、`geocoded_at` を持つ。
@@ -233,9 +235,10 @@ flowchart LR
 
 ### Secret Manager に保存する値
 
-- Twilio Account SID と Auth Token または API key/secret
+- Twilio Account SID: Secret `key-twilio-sid`
+- Twilio Auth Token: Secret `key-twilio-authToken`
 - Twilio 発信番号
-- OpenAI API key
+- OpenAI API key: Secret `key-openai-ethglobaltokyo-nolimit`
 - Google Maps Geocoding API key
 - World ID RP signing key（World ID 実装時）
 
@@ -243,10 +246,14 @@ flowchart LR
 
 ### 追跡する非秘密識別子
 
-- GCP/Firebase project ID と project number
-- Firebase Android app ID、package name
-- Cloud Run service 名、region、URL、revision 名
-- Firestore database ID と region
+- GCP/Firebase project name: `ethglobalTokyo2026LIFELiNK`
+- GCP/Firebase project ID: `ethglobaltokyo2026lifelink`
+- GCP/Firebase project number: `1023311564471`
+- Firebase Android package name: `com.rtree.LIFELiNK`
+- Firebase Android app ID（登録後に追記）
+- Cloud Run service 名（登録後に追記）、region: `asia-northeast1`、URL と revision 名（デプロイ後に追記）
+- Firestore database ID: `(default)`、region: `asia-northeast1`
+- Cloud Run service account: `lifelink-backend@ethglobaltokyo2026lifelink.iam.gserviceaccount.com`
 - Secret 名と version（値は記録しない）
 - Twilio Phone Number SID、Call SID（電話番号や token は記録しない）
 - World ID `app_id`、`rp_id`、action、environment（signing key は記録しない）
@@ -255,7 +262,7 @@ flowchart LR
 
 ### Phase 0: 人間の意思決定とクラウド準備
 
-- Android package name、GCP project、region、Firebase ログイン方式を決める。
+- Android package name、GCP project、Firebase ログイン方式、Cloud Run region、Firestore location は決定済み。
 - GCP billing、Twilio、OpenAI の利用可能状態を確認する。
 - Secret Manager を先に用意し、それから外部サービスの秘密値を登録する。
 - 完了条件: Agent が対象 project へ CLI でアクセスでき、秘密値を表示せずデプロイに利用できる。
@@ -291,7 +298,7 @@ flowchart LR
 
 ### Phase 6: 延期機能
 
-- World ID / IDKit、友人共有、Discord 風履歴、周辺音声、GATT ロック中対応を優先順位順に実装する。
+- World ID / IDKit、友人共有、Discord 風履歴、周辺音声、GATT ロック中対応を優先順位順に実装する。ただし発信 API には最初から `human_verified` の認可境界を用意し、World ID 統合後は証明済みユーザーだけが発信できるようにする。
 - World ID は `world-id-idkit` Skill と Developer Portal MCP を使い、Secret Manager の保存先を準備してから RP signing key を生成する。
 
 ## 12. 重要な制約と判断
@@ -308,10 +315,7 @@ flowchart LR
 
 実装開始前に人間が決める必要がある項目は次のとおり。その他は合理的な初期値を Agent が選び、判断をこの文書へ追記する。
 
-- Android package name
-- GCP project を新規作成するか既存 project を使うか
 - GCP region と Firestore location
-- Firebase Authentication のログイン方式
 - Twilio の発信国、発信番号、テスト受電番号
 - 位置情報を何分で「古い」と扱うか
 - 誤操作防止 UI を長押し、確認カウントダウン、スライドのどれにするか

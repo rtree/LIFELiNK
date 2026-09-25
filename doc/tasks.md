@@ -8,14 +8,14 @@
 
 | ID | 状態 | タスク | 依存 | 完了条件 |
 | --- | --- | --- | --- | --- |
-| P0-01 | BLOCKED | Android package name、GCP project、region、ログイン方式を決定する | 人間の意思決定 | 決定を `doc/plan.md` に反映済み |
-| P0-02 | BLOCKED | GCP/Firebase project と billing を利用可能にする | P0-01、人間の課金設定 | Agent が対象 project を CLI で参照可能 |
-| P0-03 | TODO | Firestore、Cloud Run、Secret Manager、service account、必要 API を構成する | P0-02 | 最小権限の実行環境と空の backend がデプロイ済み |
+| P0-01 | DONE | Android package name、GCP project、region、ログイン方式を決定する | 人間の意思決定 | 決定を `doc/plan.md` に反映済み |
+| P0-02 | DONE | GCP/Firebase project と billing を利用可能にする | P0-01、人間の課金設定 | Agent が対象 project を CLI で参照可能 |
+| P0-03 | IN PROGRESS | Firestore、Cloud Run、Secret Manager、service account、必要 API を構成する | P0-02 | 最小権限の実行環境と空の backend がデプロイ済み |
 | P0-04 | TODO | Firebase Android app、Authentication、`google-services.json` を構成する | P0-02 | 実端末からログイン成功 |
 | P0-05 | TODO | Android の位置取得・保存 UI と backend API を実装する | P0-03、P0-04 | 実端末の座標・精度・時刻・住所を再取得可能 |
 | P0-06 | TODO | 緊急連絡先登録と `contact_id` 解決を実装する | P0-03、P0-04 | E.164 番号を登録し、所有者検証付きで解決可能 |
 | P0-07 | BLOCKED | Twilio account、発信番号、テスト受電番号を準備する | 人間の契約・同意 | Agent が Secret Manager 経由でテスト発信可能 |
-| P0-08 | BLOCKED | OpenAI API key を Secret Manager へ登録する | P0-03、人間のアカウント | Cloud Run のみが Secret を参照可能 |
+| P0-08 | IN PROGRESS | OpenAI API key を Secret Manager から Cloud Run へ割り当てる | P0-03 | Cloud Run のみが Secret を参照可能 |
 | P0-09 | TODO | `EmergencyTrigger` と Android Safety gate を実装する | P0-04 | 画面ボタンが一意な `emergency_event_id` を生成 |
 | P0-10 | TODO | backend の冪等イベント作成と Twilio 発信を実装する | P0-06、P0-07、P0-09 | 連打・HTTP 再送でも実着信が一回だけ |
 | P0-11 | TODO | Twilio Media Streams と OpenAI Realtime bridge を実装する | P0-08、P0-10 | 実通話で双方向会話が成立 |
@@ -28,7 +28,7 @@
 
 | ID | 状態 | タスク | 依存 | 完了条件 |
 | --- | --- | --- | --- | --- |
-| P1-01 | TODO | World ID / IDKit の app、RP、action、proof 検証を実装する | P0-15、Secret 保存先 | 人間性証明済みユーザーだけが発信可能 |
+| P1-01 | TODO | World ID / IDKit の app、RP、action、proof 検証と発信認可を実装する | P0-15、Secret 保存先 | Googleログイン済みかつ人間性証明済みユーザーだけが発信可能 |
 | P1-02 | TODO | 友人登録・共有を実装する | P0-15 | 友人がイベントと更新を閲覧可能 |
 | P1-03 | TODO | Discord 風の緊急通話履歴を実装する | P1-02 | 自分と共有されたイベントを時系列表示 |
 | P1-04 | TODO | Android 周辺音声の扱いを設計・実装する | P0-15、同意・法務判断 | 明示同意と状態表示のもとで音声を通話へ追加可能 |
