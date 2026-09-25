@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1023311564471",
+    "project_id": "ethglobaltokyo2026lifelink",
+    "storage_bucket": "ethglobaltokyo2026lifelink.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1023311564471:android:b4e6ad83334551f40e0732",
+        "android_client_info": {
+          "package_name": "com.rtree.LIFELiNK"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC9Km6QMnWPgkzCbW9r58UthaptVOLt7vg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
