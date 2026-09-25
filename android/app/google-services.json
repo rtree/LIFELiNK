@@ -12,7 +12,20 @@
           "package_name": "com.rtree.LIFELiNK"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "1023311564471-egu7so5n2puf69kto2redrh5krjti7uj.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.rtree.LIFELiNK",
+            "certificate_hash": "daca70bd3d4a560c0cb47b25498a17764f55ccaf"
+          }
+        },
+        {
+          "client_id": "1023311564471-ds92fe3h7tgc91pmic4lq88ckcohgb16.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyC9Km6QMnWPgkzCbW9r58UthaptVOLt7vg"
@@ -20,7 +33,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1023311564471-ds92fe3h7tgc91pmic4lq88ckcohgb16.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }

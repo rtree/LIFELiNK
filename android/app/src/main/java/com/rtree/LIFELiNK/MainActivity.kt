@@ -132,10 +132,7 @@ private fun SetupScreen() {
 }
 
 private suspend fun signInWithGoogle(context: android.content.Context): String {
-    val webClientId = context.getString(R.string.google_web_client_id)
-    if (webClientId.isBlank()) {
-        return "Google OAuth clientの設定待ちです"
-    }
+    val webClientId = context.getString(R.string.default_web_client_id)
 
     return runCatching {
         val googleIdOption = GetGoogleIdOption.Builder()

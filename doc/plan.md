@@ -109,7 +109,7 @@ flowchart LR
 - Application ID / package name は `com.rtree.LIFELiNK` とする。Android と Firebase の仕様上は大文字を利用できるため、ユーザー指定を優先する。一度公開すると変更できない識別子として扱う。
 - Kotlin と Jetpack Compose を第一候補とする。
 - Firebase Authentication の Google ログインを使い、ID token を backend の Bearer token として送る。
-- 2026-09-25 に Firebase Android app登録、debug SHA-1登録、`google-services.json` 配置、debug APK buildまで完了した。Firebase ConsoleでGoogle sign-in providerを有効化してWeb OAuth clientを生成後、`google_web_client_id`を更新する必要がある。
+- 2026-09-25 に Firebase Android app登録、debug SHA-1登録、Google sign-in provider有効化、OAuth clientを含む`google-services.json`配置、debug APK buildまで完了した。Google Services pluginが生成する`default_web_client_id`をCredential Managerで使用する。残作業は実端末でのGoogleログイン確認である。
 - Google ログインはアプリへの認証、World ID は緊急発信権限の人間性証明として分離する。World ID 未証明でも初期設定はできるが、発信 API は利用できない。
 - MVP は Foreground location のみを要求する。継続的な Background location は要求しない。
 - ボタンと BLE は同じ `EmergencyTrigger` インターフェースへ変換し、必ず同じ Safety gate を通す。

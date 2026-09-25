@@ -11,7 +11,7 @@
 | P0-01 | DONE | Android package name、GCP project、region、ログイン方式を決定する | 人間の意思決定 | 決定を `doc/plan.md` に反映済み |
 | P0-02 | DONE | GCP/Firebase project と billing を利用可能にする | P0-01、人間の課金設定 | Agent が対象 project を CLI で参照可能 |
 | P0-03 | DONE | Firestore、Cloud Run、Secret Manager、service account、必要 API を構成する | P0-02 | 最小権限の実行環境と空の backend がデプロイ済み |
-| P0-04 | BLOCKED | Firebase Android app、Authentication、`google-services.json` を構成する | P0-02、人間によるGoogle provider有効化 | 実端末からログイン成功 |
+| P0-04 | IN PROGRESS | Firebase Android app、Authentication、`google-services.json` を構成する | P0-02 | Google providerとOAuth clientの組み込み・debug buildは完了。残りは実端末からのログイン成功 |
 | P0-05 | TODO | Android の位置取得・保存 UI と backend API を実装する | P0-03、P0-04 | 実端末の座標・精度・時刻・住所を再取得可能 |
 | P0-06 | TODO | 緊急連絡先登録と `contact_id` 解決を実装する | P0-03、P0-04 | E.164 番号を登録し、所有者検証付きで解決可能 |
 | P0-07 | IN PROGRESS | Twilio account、発信番号、テスト受電番号を準備する | 人間の契約・同意 | Agent が Secret Manager 経由でテスト発信可能 |
