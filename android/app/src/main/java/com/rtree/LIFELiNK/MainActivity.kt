@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.location.Geocoder
 import android.os.Bundle
+import android.os.Build
 import android.os.SystemClock
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -71,17 +72,37 @@ private fun SetupScreen() {
     val scope = rememberCoroutineScope()
     val apiClient = remember { LifeLinkApiClient() }
     val safetyGate = remember { EmergencySafetyGate(context) }
+    val emergencyPreferences = remember { EmergencyPreferences(context) }
     var status by remember { mutableStateOf("Googleでログインしてください") }
     var locationText by remember { mutableStateOf("位置情報はまだ保存されていません") }
-    var currentLocation by remember { mutableStateOf<LocationSnapshot?>(null) }
+    var currentLocation by remember { mutableStateOf(emergencyPreferences.location) }
     var contactName by remember { mutableStateOf("") }
     var contactPhone by remember { mutableStateOf("") }
-    var contactId by remember { mutableStateOf<String?>(null) }
-    var contactText by remember { mutableStateOf("緊急連絡先は未登録です") }
+    var contactId by remember { mutableStateOf(emergencyPreferences.contactId) }
+    var contactText by remember {
+        mutableStateOf(
+            emergencyPreferences.maskedContact?.let { "登録済み: $it" }
+                ?: "緊急連絡先は未登録です",
+        )
+    }
     var initialNote by remember { mutableStateOf("") }
     var armedAt by remember { mutableStateOf<Long?>(null) }
     var emergencyText by remember { mutableStateOf("緊急発信は待機中です") }
     var activeEmergencyEventId by remember { mutableStateOf<String?>(null) }
+    var beaconText by remember { mutableStateOf("Beacon監視は停止中です") }
+
+    val requestBluetoothPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { grants ->
+        if (grants.values.any { it }) {
+            beaconText = runCatching {
+                BeaconTriggerManager.start(context)
+                "Beacon監視中"
+            }.getOrElse { error -> "Beacon監視開始失敗: ${error.userMessage()}" }
+        } else {
+            beaconText = "Bluetooth scan権限が拒否されました"
+        }
+    }
 
     suspend fun captureAndSaveLocation() {
         runCatching {
@@ -90,6 +111,7 @@ private fun SetupScreen() {
             }
         }.onSuccess { location ->
             currentLocation = location
+            emergencyPreferences.location = location
             locationText = location.displayText()
             activeEmergencyEventId?.let { eventId ->
                 runCatching {
@@ -196,6 +218,8 @@ private fun SetupScreen() {
                         apiClient.createContact(contactName, contactPhone)
                     }.onSuccess { contact ->
                         contactId = contact.contactId
+                        emergencyPreferences.contactId = contact.contactId
+                        emergencyPreferences.maskedContact = "$contactName / ${contact.maskedPhone}"
                         contactText = "登録済み: $contactName / ${contact.maskedPhone}"
                     }.onFailure { error ->
                         contactText = "連絡先登録失敗: ${error.userMessage()}"
@@ -291,6 +315,28 @@ private fun SetupScreen() {
             },
         ) {
             Text("通話中メモを送信")
+        }
+        Text(beaconText)
+        Button(
+            modifier = Modifier.fillMaxWidth(),
+            enabled = contactId != null,
+            onClick = {
+                if (BeaconTriggerManager.hasPermission(context)) {
+                    beaconText = runCatching {
+                        BeaconTriggerManager.start(context)
+                        "Beacon監視中"
+                    }.getOrElse { error -> "Beacon監視開始失敗: ${error.userMessage()}" }
+                } else {
+                    val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        arrayOf(Manifest.permission.BLUETOOTH_SCAN)
+                    } else {
+                        arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
+                    }
+                    requestBluetoothPermission.launch(permissions)
+                }
+            },
+        ) {
+            Text("Beacon監視を開始")
         }
         Spacer(Modifier.height(12.dp))
         Text("Backend: ${BuildConfig.BACKEND_URL}", style = MaterialTheme.typography.bodySmall)

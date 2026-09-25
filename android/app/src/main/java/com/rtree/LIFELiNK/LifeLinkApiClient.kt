@@ -24,6 +24,17 @@ data class LocationSnapshot(
         .put("captured_at", capturedAt)
         .put("address", address ?: JSONObject.NULL)
         .put("geocoded_at", geocodedAt ?: JSONObject.NULL)
+
+    companion object {
+        fun fromJson(json: JSONObject): LocationSnapshot = LocationSnapshot(
+            latitude = json.getDouble("latitude"),
+            longitude = json.getDouble("longitude"),
+            accuracyMeters = json.getDouble("accuracy_m").toFloat(),
+            capturedAt = json.getString("captured_at"),
+            address = if (json.isNull("address")) null else json.getString("address"),
+            geocodedAt = if (json.isNull("geocoded_at")) null else json.getString("geocoded_at"),
+        )
+    }
 }
 
 data class ContactRegistration(

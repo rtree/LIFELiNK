@@ -41,8 +41,17 @@ class EmergencySafetyGate(context: Context) {
             .apply()
     }
 
+    @Synchronized
+    fun acceptBeaconBurst(nowMillis: Long = System.currentTimeMillis()): Boolean {
+        val previous = preferences.getLong(LAST_BEACON_SEEN_AT, 0L)
+        preferences.edit().putLong(LAST_BEACON_SEEN_AT, nowMillis).apply()
+        return previous == 0L || nowMillis - previous > BEACON_BURST_GAP_MS
+    }
+
     private companion object {
         const val ACTIVE_EVENT_ID = "active_event_id"
         const val ACTIVE_CONTACT_ID = "active_contact_id"
+        const val LAST_BEACON_SEEN_AT = "last_beacon_seen_at"
+        const val BEACON_BURST_GAP_MS = 30_000L
     }
 }
