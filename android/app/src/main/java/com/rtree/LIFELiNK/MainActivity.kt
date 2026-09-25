@@ -484,11 +484,13 @@ private suspend fun reverseGeocode(
     latitude: Double,
     longitude: Double,
 ): String? = withContext(Dispatchers.IO) {
+    // Hackathon privacy policy: only the prefecture leaves the device. Never
+    // send/persist a full street-level address (getAddressLine would include it).
     runCatching {
         Geocoder(context, Locale.JAPAN)
             .getFromLocation(latitude, longitude, 1)
             ?.firstOrNull()
-            ?.getAddressLine(0)
+            ?.adminArea
     }.getOrNull()
 }
 

@@ -56,6 +56,14 @@
 
 上記は実装に着手する順序を後回しにするだけであり、データ構造・API 境界・画面遷移は主線と並行して本文書内（6 章「友人共有とライブフィードのデータモデル」、4 章「Discord 風 UI 画面遷移」、5 章の OpenAI Realtime 拡張）で先に確定する。主線実装者は、これらの設計に反しない範囲でフィールド名・コレクション構造を選ぶこと。
 
+### ハッカソン提出範囲について（2026-09-26）
+
+P1（友人共有・フル UI モックの実装）と P2（8a 章の GPT Live 状況ストア/Responses delegation）は、設計・データ構造・Firestore rules の先回りはここまでで完了しているが、**ハッカソン提出物としての実装対象には含めない**。理由:
+
+- P2 は `emergency_events`/`updates` という P0 で既に動いている単純なモデルを `emergencySessions`/`facts`/`timeline`/`delegations` へ置き換える設計であり、`backend/src/voice.ts` の Media Stream bridge を作り直す規模の変更になる。ハッカソン残り時間で着手すると、動いている縦断デモを壊すリスクの方が新機能の得点より大きい。
+- フル UI（4a 章）のうち Discord 連携・録音共有・友人共有 UI はいずれも新しい外部依存（Discord bot、Twilio 録音、Compose の新規大規模画面）を伴い、実装量に対して残り時間が見合わない。
+- したがって P0（実通話 + Safety gate + World ID + Beacon）が実機で安定して動くことを最優先し、P1/P2 は「設計は残したが今回は実装しない」学習・応募資料上の説明にとどめる。時間が本当に余った場合のみ、影響範囲が小さいもの（例: P1-06a のプロフィール項目追加程度）から着手を検討する。
+
 ## 4. ユーザーフロー
 
 ### 初期設定
@@ -211,11 +219,10 @@ flowchart LR
 
 ### `users/{uid}/locations/{location_id}`
 
-- `latitude`
-- `longitude`
-- `accuracy_m`
+2026-09-26 のプライバシー方針（8 章）により、Android は `latitude`/`longitude`/`accuracy_m` を API リクエストには含めるが、backend は保存前に削除する。Firestore に残るのは次のとおり。
+
+- `address`（都道府県レベル、Android の `Geocoder.adminArea` で解決）
 - `captured_at`
-- `address`
 - `geocoded_at`
 
 ### `emergency_events/{emergency_event_id}`
@@ -225,7 +232,7 @@ flowchart LR
 - `trigger_type`: `screen_button` または `ble`
 - `trigger_source`: `trigger_type` が `ble` のときのみ `beacon` または `gatt`
 - `state`: `accepted`、`dialing`、`in_progress`、`completed`、`failed`
-- `location_snapshot`
+- `location_snapshot`（`address`/`captured_at`/`geocoded_at` のみ。GPS 座標・精度は含まない）
 - `initial_note`
 - `twilio_call_sid`
 - `created_at`
@@ -504,17 +511,17 @@ BLE 層から電話 API や Firebase を直接呼ばない。Android Controller 
 
 ## 8. AI の初回発話仕様
 
+**位置情報のプライバシー方針（2026-09-26、ハッカソン提出物としての方針）**: GPS 座標（緯度・経度）と位置精度（accuracy）は Android から backend へ送られる際に受理はするが、Firestore へは一切保存しない（`users/{uid}/locations`、`emergency_events.location_snapshot`、`updates.payload` のいずれも住所と時刻のみ）。住所自体も Android の `Geocoder` で都道府県レベル（`adminArea`）までしか解決せず、市区町村・番地を含む詳細住所は端末から一歩も外に出さない。理由は実利用時の安全性ではなく、ETHGlobal Tokyo のデモ・配信で発表者自身の実位置情報が公開されてしまうことを避けるため。実運用でピンポイントの位置共有が必要になった場合は、この制限を明示的に緩める判断を別途行うこと（12 章参照）。
+
 初回発話は次の順序を固定し、欠けている値を推測しない。
 
 1. 「これは LIFELiNK 緊急連絡アプリからの自動電話です」
-2. 住所。取得できない場合は「住所は取得できていません」
-3. 緯度・経度
-4. 位置精度。例: 「精度は約 20 メートルです」
-5. 情報の鮮度。例: 「この位置は 45 秒前に取得されました」
-6. ユーザーが発信前に入力した状況メモ
-7. 「新しい情報が入り次第お伝えします」
+2. 都道府県レベルの現在地。取得できない場合は「現在地の都道府県は取得できていません」
+3. 情報の鮮度。例: 「この位置は 45 秒前に取得されました」
+4. ユーザーが発信前に入力した状況メモ
+5. 「新しい情報が入り次第お伝えします」
 
-古い位置を現在地と断定しない。鮮度が基準を超えた場合は「最後に確認できた位置」と表現する。住所、座標、時刻はモデルに自由生成させず、backend が構造化データから初回メッセージを組み立てる。
+古い位置を現在地と断定しない。鮮度が基準を超えた場合は「最後に確認できた位置」と表現する。住所、時刻はモデルに自由生成させず、backend が構造化データから初回メッセージを組み立てる。GPS 座標・番地レベルの住所・位置精度は初回発話にも通話中更新にも含めない。
 
 ## 8a. 状況ストアと Responses delegation の詳細設計（GPT Live、設計を先に確定、実装は P2）
 
@@ -892,6 +899,7 @@ World ID / IDKit は延期機能ではなく、実通話前の発信認可とし
 - Android の Background location は権限・Foreground Service・Google Play 審査の負担が大きいため MVP から外す。GATT 常時接続はロック中配送を目的とするため Background location とは別の制約（6b 章）で扱う。
 - BLE payload には電話番号・位置情報・認証情報・秘密情報を含めない。BLE はイベント通知専用とし、位置情報の収集と発信判断は Android Controller が Safety gate 通過後に行う。
 - 位置情報、電話番号、会話内容は機微情報として扱い、保存量と保持期間を最小化する。MVP では音声を録音しない。（録音・友人共有を行う場合の要件は 4a 章「未決の論点 2」を参照）
+- GPS 座標・位置精度は Firestore へ保存せず、AI にも読み上げさせない。住所は都道府県レベルまでしか解決・保存しない（8 章参照）。これはハッカソンのデモ・配信で発表者の実位置が公開されるのを避けるための方針であり、実運用でピンポイント共有が必要になった場合は明示的に緩和を判断する。
 - AI が誤った位置を作らないよう、位置情報の文面は backend が生成する。
 - 通話相手には冒頭で AI による自動電話であることを明示する。
 - 実番号へのテスト発信は、発信先の事前同意と時間帯の確認後に行う。

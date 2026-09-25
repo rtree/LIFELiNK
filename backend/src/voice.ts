@@ -81,6 +81,7 @@ export async function placeEmergencyCall(
   const voiceConfig = requireVoiceConfig();
   const response = new twilio.twiml.VoiceResponse();
   const stream = response.connect().stream({
+    statusCallback: `${config.BACKEND_URL}/v1/twilio/stream-status?emergencyEventId=${encodeURIComponent(emergencyEventId)}`,
     url: config.BACKEND_URL.replace(/^https:/, "wss:") + "/v1/twilio/media",
   });
   stream.parameter({ name: "emergencyEventId", value: emergencyEventId });
@@ -96,7 +97,10 @@ export async function placeEmergencyCall(
   return call.sid;
 }
 
-export function isValidTwilioRequest(request: FastifyRequest): boolean {
+export function isValidTwilioRequest(
+  request: FastifyRequest,
+  protocol: "https" | "wss" = "https",
+): boolean {
   if (!config.TWILIO_AUTH_TOKEN) {
     return false;
   }
@@ -104,7 +108,10 @@ export function isValidTwilioRequest(request: FastifyRequest): boolean {
   if (typeof signature !== "string") {
     return false;
   }
-  const url = `${config.BACKEND_URL}${request.url}`;
+  const baseUrl = protocol === "wss"
+    ? config.BACKEND_URL.replace(/^https:/, "wss:")
+    : config.BACKEND_URL;
+  const url = `${baseUrl}${request.url}`;
   const params =
     request.body && typeof request.body === "object"
       ? (request.body as Record<string, string>)
@@ -116,15 +123,12 @@ function buildInitialMessage(context: InitialContext): string {
   const freshness = context.capturedAt
     ? `${Math.max(0, Math.round((Date.now() - Date.parse(context.capturedAt)) / 1000))}秒前`
     : "取得時刻不明";
+  // Hackathon privacy policy: never speak raw GPS coordinates or accuracy.
+  // `context.address` is already prefecture-level only (Android reverse-geocodes
+  // to adminArea before sending), so this is the coarsest location we ever say.
   return [
     "これはLIFELiNK緊急連絡アプリからの自動電話です。",
-    context.address ? `住所は${context.address}です。` : "住所は取得できていません。",
-    context.latitude !== null && context.longitude !== null
-      ? `座標は緯度${context.latitude}、経度${context.longitude}です。`
-      : "座標は取得できていません。",
-    context.accuracyM !== null
-      ? `位置精度は約${Math.round(context.accuracyM)}メートルです。`
-      : "位置精度は不明です。",
+    context.address ? `本人がいるのは${context.address}付近です。` : "現在地の都道府県は取得できていません。",
     `位置情報は${freshness}に取得されました。`,
     context.initialNote ? `本人からのメモは「${context.initialNote}」です。` : "本人からの状況メモはありません。",
     "新しい情報が入り次第お伝えします。",
@@ -139,7 +143,8 @@ export function registerMediaBridge(
   ) => Promise<InitialContext | null>,
 ): void {
   app.get("/v1/twilio/media", { websocket: true }, (twilioSocket, request) => {
-    if (!isValidTwilioRequest(request)) {
+    if (!isValidTwilioRequest(request, "wss")) {
+      app.log.warn("Rejected Media Stream with invalid Twilio signature");
       twilioSocket.close(1008, "invalid Twilio signature");
       return;
     }
@@ -152,6 +157,10 @@ export function registerMediaBridge(
     let streamSid: string | null = null;
     let emergencyEventId: string | null = null;
     let pendingInitialMessage: string | null = null;
+    const pendingInputAudio: string[] = [];
+    let inboundAudioFrames = 0;
+    let outputAudioFrames = 0;
+    let speechTurns = 0;
 
     const sendInitialMessage = () => {
       if (!pendingInitialMessage || openAiSocket.readyState !== WebSocket.OPEN) {
@@ -198,6 +207,11 @@ export function registerMediaBridge(
       if (emergencyEventId) {
         activeRealtimeSessions.set(emergencyEventId, openAiSocket);
       }
+      pendingInputAudio.splice(0).forEach((audio) => {
+        openAiSocket.send(
+          JSON.stringify({ type: "input_audio_buffer.append", audio }),
+        );
+      });
       sendInitialMessage();
     });
 
@@ -212,6 +226,7 @@ export function registerMediaBridge(
         streamSid = start.start.streamSid;
         emergencyEventId = start.start.customParameters?.emergencyEventId ?? null;
         if (!emergencyEventId) {
+          app.log.warn("Closing Media Stream without emergency event ID");
           twilioSocket.close(1008, "missing emergency event");
           return;
         }
@@ -220,6 +235,10 @@ export function registerMediaBridge(
           start.start.callSid,
         );
         if (!context) {
+          app.log.warn(
+            { emergencyEventId, callSid: start.start.callSid },
+            "Closing Media Stream because event context did not match",
+          );
           twilioSocket.close(1008, "emergency event not found");
           return;
         }
@@ -231,13 +250,16 @@ export function registerMediaBridge(
         sendInitialMessage();
       }
 
-      if (message.event === "media" && openAiSocket.readyState === WebSocket.OPEN) {
-        openAiSocket.send(
-          JSON.stringify({
-            type: "input_audio_buffer.append",
-            audio: (message as TwilioMediaMessage).media.payload,
-          }),
-        );
+      if (message.event === "media") {
+        const audio = (message as TwilioMediaMessage).media.payload;
+        inboundAudioFrames += 1;
+        if (openAiSocket.readyState === WebSocket.OPEN) {
+          openAiSocket.send(
+            JSON.stringify({ type: "input_audio_buffer.append", audio }),
+          );
+        } else if (pendingInputAudio.length < MAX_PENDING_INPUT_FRAMES) {
+          pendingInputAudio.push(audio);
+        }
       }
     });
 
@@ -251,6 +273,7 @@ export function registerMediaBridge(
         event.delta &&
         (event.type === "response.output_audio.delta" || event.type === "response.audio.delta")
       ) {
+        outputAudioFrames += 1;
         twilioSocket.send(
           JSON.stringify({
             event: "media",
@@ -258,6 +281,10 @@ export function registerMediaBridge(
             media: { payload: event.delta },
           }),
         );
+      }
+      if (event.type === "input_audio_buffer.speech_started" && streamSid) {
+        speechTurns += 1;
+        twilioSocket.send(JSON.stringify({ event: "clear", streamSid }));
       }
       if (event.type === "error") {
         app.log.error({ openAiEvent: event.type }, "OpenAI Realtime error");
@@ -278,8 +305,29 @@ export function registerMediaBridge(
         openAiSocket.close();
       }
     };
-    twilioSocket.on("close", closeBoth);
-    openAiSocket.on("close", closeBoth);
+    twilioSocket.on("close", (code, reason) => {
+      app.log.info(
+        {
+          code,
+          reason: reason.toString(),
+          emergencyEventId,
+          inboundAudioFrames,
+          outputAudioFrames,
+          speechTurns,
+        },
+        "Twilio Media Stream closed",
+      );
+      closeBoth();
+    });
+    openAiSocket.on("close", (code, reason) => {
+      app.log.info(
+        { code, reason: reason.toString(), emergencyEventId },
+        "OpenAI Realtime WebSocket closed",
+      );
+      closeBoth();
+    });
     openAiSocket.on("error", (error) => app.log.error(error, "OpenAI WebSocket failed"));
   });
 }
+
+const MAX_PENDING_INPUT_FRAMES = 100;

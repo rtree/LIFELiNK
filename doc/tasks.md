@@ -37,14 +37,17 @@
 | P0.5-04 | DONE | `emergencySessions` 系サブコレクションと `world_id_nullifiers` の Firestore security rules を先行デプロイする | P0.5-03、P0.5-02 | 2026-09-26: P2 実装が始まる前に、これらのコレクションが default rules で開いたままにならないよう `firestore.rules` へ owner/participant 読み取り・全書き込み拒否のルールを追加し `firebase deploy --only firestore:rules` で反映済み |
 | P0.5-05 | DONE | フル UI モック（`doc/uimock/`）を最終系から逆算し、画面インベントリと未決の 3 論点を確定する | なし | 決定を `doc/plan.md` 4a 章に反映済み。1-1〜3-8 の全画面を P0/P1/P2 にマッピングし、`nickname`/`area` フィールド追加とローカル 2 段階音声アナウンスという 2 つの新規要件、および「警察自動通報」「通話録音共有」「友人 UI を自作するか実 Discord を使うか」という 3 つの未決論点を明記した。Android UI 実装自体は他チームが P0 で進行中のため、ここでは着手しない |
 | P0.5-06 | DONE | P2 の `emergencySessions` のコレクション配置を確定する | P0.5-03、P0.5-04 | 2026-09-26: 一度 `users/{uid}` 配下にネストする案を検討したが、友人共有（`participant_uids`）が主要ユースケースであり collectionGroup クエリと webhook 経由の owner_uid 伝達が必要になる点を重く見て、**ルート直下の `emergencySessions/{session_id}`（P0 の `emergency_events` と同じ配置）に確定**した。`doc/plan.md` 8a 章と `firestore.rules` をルート直下パターンへ戻し `firebase deploy --only firestore:rules` で再デプロイ・compile成功を確認済み |
+| P0.5-07 | DONE | GPS 座標・位置精度を Firestore へ保存しない、住所は都道府県レベルまでしか解決・発話しないハッカソン向けプライバシー方針を実装する | なし | 2026-09-26: `android/.../MainActivity.kt` の逆ジオコーディングを `getAddressLine(0)`（番地まで含む全体住所）から `adminArea`（都道府県のみ）へ変更。`backend/src/server.ts` に `sanitizeLocationForPersistence()` を追加し `/v1/locations`・`emergency_events.location_snapshot`・`updates.payload` の3箇所で緯度経度・精度を保存前に除去。`backend/src/voice.ts` の `buildInitialMessage` から座標・精度の読み上げ文を削除。Fastify logger の `redact` に `latitude`/`longitude`/`accuracy_m` 系パスを追加しログにも残さないようにした。typecheck/build green。`doc/plan.md` 6・8・12 章に方針と理由（デモでの実位置公開を避けるため）を明記 |
 
 注記: P0-13（通話中メモ・位置更新）を実装する際は、`updates` ドキュメントのフィールド名を `doc/plan.md` 6a 章の拡張スキーマ（`type`、`author_type`、`author_uid` などを含む）に合わせること。P1 での friend_comment / transcript 追加時にフィールド追加のみで済ませるため。
 
 ## P1: 実通話成立後
 
+**2026-09-26 方針**: P1・P2 は設計・データ構造・Firestore rules の先回りは完了したが、**ハッカソン提出物としては実装しない**。P0（実通話 + Safety gate + World ID + Beacon）を実機で安定させることを最優先する。以下の P1/P2 タスクは参照用の設計記録として残し、着手しない。
+
 | ID | 状態 | タスク | 依存 | 完了条件 |
 | --- | --- | --- | --- | --- |
-| P1-01 | TODO | フル UI モックの残る未決 2 論点（`doc/plan.md` 4a 章、論点 1（警察自動通報の文言）は 2026-09-26 に人間が「登録済み緊急連絡先に限定し、警察を目標にしない」と決定済み）を確定する: (1) 通話録音・書き起こしを友人へ共有するか、(2) 友人共有 UI をアプリ内自作（Option A）にするか実 Discord bot（Option B）にするか | P0-15 | 決定を `doc/plan.md` 4a 章に反映済み。P1-02〜P1-06 は決定後の方式に合わせて着手する |
+| P1-01 | TODO | フル UI モックの残る未決 2 論点（`doc/plan.md` 4a 章、論点 1（警察自動通報の文言）は 2026-09-26 に人間が「登録済み緊急連絡先に限定し、警察を目標にしない」と決定済み）を確定する: (1) 通話録音・書き起こしを友人へ共有するか、(2) 友人共有 UI をアプリ内自作（Option A）にするか実 Discord bot（Option B）にするか | P0-15 | ハッカソン提出物としては上記方針で保留。決定を `doc/plan.md` 4a 章に反映済み |
 | P1-01a | TODO | Discord 個別連絡先方式の可否を決定する（4a 章の候補設計）。電話先と DM 受信者の関係・人数・通知同意・返信の AI 注入有無・Social SDK 申請要否を確定する | P1-01、受信者の事前同意 | 友人一覧に通常 OAuth ではアクセスできない制約を踏まえ、招待・本人確認・公開範囲・フォールバックを合意して `doc/plan.md` に記録 |
 | P1-01b | TODO | P1-01a で Discord 個別連絡を選んだ場合、招待→受信者 opt-in→Bot テスト DM→モーダル返信→`updates` 保存の最小縦断フローを実装・実測する | P1-01a、P0-15 | 事前同意済みの相手で配送成功/失敗が区別され、返信が許可したイベントに一回だけ記録される。電話発信は Discord 障害でも継続する |
 | P1-02 | TODO | `friend_links` コレクションと招待コード発行・承認 API（`/v1/friends/*`）を実装する（P1-01 で Option A を選んだ場合） | P0-15、P0.5-01、P1-01 | 相互承認済みの友人一覧が取得でき、`pending`/`accepted`/`blocked` を切り替えられる |
@@ -66,7 +69,7 @@
 
 ## P2: GPT Live 状況ストアと Responses delegation
 
-`doc/plan.md` 8a 章の設計に対応する実装タスク。P0/P1 の実通話・友人共有が安定してから着手する。
+`doc/plan.md` 8a 章の設計に対応する実装タスク。**2026-09-26 方針でハッカソン提出範囲外（上記参照）**。P0/P1 の実通話・友人共有が安定し、余裕がある場合のみ検討する。
 
 | ID | 状態 | タスク | 依存 | 完了条件 |
 | --- | --- | --- | --- | --- |

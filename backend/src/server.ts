@@ -27,7 +27,19 @@ if (getApps().length === 0) {
 const db = getFirestore();
 const app = Fastify({
   logger: {
-    redact: ["req.headers.authorization", "body.phone"],
+    redact: [
+      "req.headers.authorization",
+      "body.phone",
+      "body.latitude",
+      "body.longitude",
+      "body.accuracy_m",
+      "body.location_snapshot.latitude",
+      "body.location_snapshot.longitude",
+      "body.location_snapshot.accuracy_m",
+      "body.location.latitude",
+      "body.location.longitude",
+      "body.location.accuracy_m",
+    ],
   },
 });
 
@@ -37,12 +49,25 @@ await app.register(websocket);
 registerWorldIdRoutes(app, db);
 
 registerMediaBridge(app, async (eventId, callSid) => {
-  const event = await db.collection("emergency_events").doc(eventId).get();
-  if (
-    !event.exists ||
-    event.get("twilio_call_sid") !== callSid ||
-    !new Set(["dialing", "in_progress"]).has(event.get("state") as string)
-  ) {
+  const eventRef = db.collection("emergency_events").doc(eventId);
+  const event = await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(eventRef);
+    if (!snapshot.exists) return null;
+    const storedCallSid = snapshot.get("twilio_call_sid") as string | undefined;
+    if (storedCallSid && storedCallSid !== callSid) return null;
+    if (!new Set(["accepted", "dialing", "in_progress"]).has(snapshot.get("state") as string)) {
+      return null;
+    }
+    if (!storedCallSid) {
+      transaction.update(eventRef, {
+        twilio_call_sid: callSid,
+        state: "in_progress",
+        updated_at: FieldValue.serverTimestamp(),
+      });
+    }
+    return snapshot;
+  });
+  if (!event) {
     return null;
   }
   const location = event.get("location_snapshot") as
@@ -77,6 +102,17 @@ const locationSchema = z.object({
   address: z.string().trim().max(500).nullable(),
   geocoded_at: z.iso.datetime().nullable(),
 });
+
+// Hackathon privacy policy: GPS coordinates and accuracy are accepted from the
+// device (still useful transiently) but never written to Firestore or spoken.
+// Only the prefecture-level `address` Android already resolves is persisted.
+function sanitizeLocationForPersistence(location: z.infer<typeof locationSchema>) {
+  return {
+    address: location.address,
+    captured_at: location.captured_at,
+    geocoded_at: location.geocoded_at,
+  };
+}
 
 const emergencyEventSchema = z.object({
   emergency_event_id: z.uuid(),
@@ -116,7 +152,7 @@ function formatEmergencyUpdate(
   }
   const location = update.location;
   const address = location.address ?? "住所不明";
-  return `本人の更新位置: ${address}、緯度${location.latitude}、経度${location.longitude}、精度約${Math.round(location.accuracy_m)}メートル。取得時刻${location.captured_at}`;
+  return `本人の更新位置: ${address}。取得時刻${location.captured_at}`;
 }
 
 app.get("/health", async () => ({ status: "ok" }));
@@ -182,7 +218,7 @@ app.post(
       .collection("locations")
       .doc();
     await locationRef.set({
-      ...parsed.data,
+      ...sanitizeLocationForPersistence(parsed.data),
       created_at: FieldValue.serverTimestamp(),
     });
 
@@ -236,7 +272,9 @@ app.post(
         contact_id: parsed.data.contact_id,
         trigger_type: parsed.data.trigger_type,
         state: "accepted",
-        location_snapshot: parsed.data.location_snapshot,
+        location_snapshot: parsed.data.location_snapshot
+          ? sanitizeLocationForPersistence(parsed.data.location_snapshot)
+          : null,
         initial_note: parsed.data.initial_note,
         created_at: FieldValue.serverTimestamp(),
         updated_at: FieldValue.serverTimestamp(),
@@ -334,7 +372,9 @@ app.post(
         text,
         mentioned_uids: [],
         payload:
-          parsed.data.type === "location" ? parsed.data.location : { text: parsed.data.text },
+          parsed.data.type === "location"
+            ? sanitizeLocationForPersistence(parsed.data.location)
+            : { text: parsed.data.text },
         created_at: FieldValue.serverTimestamp(),
         delivered_to_ai_at: null,
       });
@@ -382,11 +422,21 @@ app.post("/v1/twilio/status", async (request, reply) => {
     return reply.code(400).send({ error: "invalid_twilio_status" });
   }
   const eventRef = db.collection("emergency_events").doc(query.emergencyEventId);
-  const event = await eventRef.get();
-  if (!event.exists) {
+  const eventOutcome = await db.runTransaction(async (transaction) => {
+    const event = await transaction.get(eventRef);
+    if (!event.exists) return "missing" as const;
+    const storedCallSid = event.get("twilio_call_sid") as string | undefined;
+    if (storedCallSid && storedCallSid !== body.CallSid) return "mismatch" as const;
+    transaction.update(eventRef, {
+      twilio_call_sid: body.CallSid,
+      updated_at: FieldValue.serverTimestamp(),
+    });
+    return "matched" as const;
+  });
+  if (eventOutcome === "missing") {
     return reply.code(404).send({ error: "emergency_event_not_found" });
   }
-  if (event.get("twilio_call_sid") !== body.CallSid) {
+  if (eventOutcome === "mismatch") {
     return reply.code(409).send({ error: "twilio_call_sid_mismatch" });
   }
   const stateByStatus: Record<string, string> = {
@@ -404,6 +454,30 @@ app.post("/v1/twilio/status", async (request, reply) => {
     twilio_call_sid: body.CallSid,
     updated_at: FieldValue.serverTimestamp(),
   });
+  return reply.code(204).send();
+});
+
+app.post("/v1/twilio/stream-status", async (request, reply) => {
+  if (!isValidTwilioRequest(request)) {
+    return reply.code(403).send({ error: "invalid_twilio_signature" });
+  }
+  const query = request.query as { emergencyEventId?: string };
+  const body = request.body as {
+    CallSid?: string;
+    StreamEvent?: string;
+    StreamError?: string;
+    StreamSid?: string;
+  };
+  app.log.info(
+    {
+      emergencyEventId: query.emergencyEventId ?? null,
+      callSid: body.CallSid ?? null,
+      streamSid: body.StreamSid ?? null,
+      streamEvent: body.StreamEvent ?? null,
+      streamError: body.StreamError ?? null,
+    },
+    "Twilio Media Stream status",
+  );
   return reply.code(204).send();
 });
 
