@@ -11,12 +11,12 @@
 | P0-01 | DONE | Android package name、GCP project、region、ログイン方式を決定する | 人間の意思決定 | 決定を `doc/plan.md` に反映済み |
 | P0-02 | DONE | GCP/Firebase project と billing を利用可能にする | P0-01、人間の課金設定 | Agent が対象 project を CLI で参照可能 |
 | P0-03 | DONE | Firestore、Cloud Run、Secret Manager、service account、必要 API を構成する | P0-02 | 最小権限の実行環境と空の backend がデプロイ済み |
-| P0-04 | IN PROGRESS | Firebase Android app、Authentication、`google-services.json` を構成する | P0-02 | Google provider/OAuth client組み込み済み。2026-09-26: Apple SiliconホストのAPI 36 emulatorでCredential Manager→Firebase Googleログイン成功、UID発行、ログイン済みUIを確認。残りは物理端末確認 |
+| P0-04 | DONE | Firebase Android app、Authentication、`google-services.json` を構成する | P0-02 | 2026-09-26: Samsung物理端末（Android 16/API 36）でCredential Manager→Firebase Googleログイン成功、UID発行、再起動後のログイン状態復元を確認 |
 | P0-05 | IN PROGRESS | Android の位置取得・保存 UI と backend API を実装する | P0-03、P0-04 | Androidと認証済み保存APIは実装済み。残りは実端末の座標・精度・時刻・住所を再取得する確認 |
 | P0-06 | IN PROGRESS | 緊急連絡先登録と `contact_id` 解決を実装する | P0-03、P0-04 | Android登録UIと所有者配下へのbackend保存は実装済み。残りは実端末確認 |
 | P0-07 | DONE | Twilio account、発信番号、テスト受電番号を準備する | 人間の契約・同意 | 2026-09-25: Secret Manager 経由で Twilio Account API を確認。`status: active`、`type: Full`（trial 制限なし）、残高 1814.52 JPY、`key-twilio-from-number` が voice 対応の in-use 番号であることを確認済み。Cloud Run `lifelink-backend` に 4 secret（sid/authToken/from-number/openai）が正しく bind 済み。実際のテスト発信自体は発信先の事前同意取得後に P0-15 で実施する |
 | P0-08 | DONE | OpenAI API key を Secret Manager から Cloud Run へ割り当てる | P0-03 | Cloud Run のみが Secret を参照可能 |
-| P0-08A | IN PROGRESS | World ID app、RP、action、proof検証と発信認可を実装する | RP登録・署名鍵のSecret Manager保存・Cloud Run割当は完了 | Backend-driven flow、Android connector起動、`getIdToken(true)`実装済み。2026-09-26: NodeのIDKit WASM `file://`読込を修正してCloud Run `lifelink-backend-00013-dq4`へ配信。host emulatorの実Firebase tokenで`POST /v1/world-id/start` HTTP 200、connector URI起動、World App未導入時のPlay Store誘導を確認。残りはWorld App導入済み物理端末でproof完了、nullifier保存、`human_verified`反映を確認。`pendingRequests`はin-memoryのためscale-to-zero時にflowを失う軽微なリスクあり |
+| P0-08A | DONE | World ID app、RP、action、proof検証と発信認可を実装する | RP登録・署名鍵のSecret Manager保存・Cloud Run割当は完了 | 2026-09-26: Samsung物理端末のWorld AppでProof of Humanを完了し、Congratulations表示、backend status HTTP 200、Firebase `human_verified` claim、LIFELiNKの「World ID人間証明済み」を確認。証明済みユーザーの再証明フローも成功。途中の一時DNS失敗はflow IDを保持してpollを継続し「自動で再試行しています」と表示する |
 | P0-09 | IN PROGRESS | `EmergencyTrigger` と Android Safety gate を実装する | P0-04 | 永続event IDと二段階確認の画面ボタンは実装済み。残りはBLE共通interface化と実端末確認 |
 | P0-10 | IN PROGRESS | backend の冪等イベント作成と Twilio 発信を実装する | P0-06、P0-07、P0-08A、P0-09 | 連打・HTTP 再送でも実着信が一回だけ |
 | P0-11 | IN PROGRESS | Twilio Media Streams と OpenAI Realtime bridge を実装する | P0-08、P0-10 | 実通話で双方向会話が成立 |
@@ -25,7 +25,7 @@
 | P0-14 | IN PROGRESS | BLE Beacon 経路（専用 UUID/Major/Minor 広告、`BeaconReceiver`/Filter/PendingIntent、重複排除）を Safety gate へ接続する | P0-09 | 確定UUID/Major/Minorの完全一致filter、PendingIntent receiver、30秒広告バースト重複排除、共通Safety gate/API接続は実装・debug build済み。残りは実機の長押し一回がAndroidで一回の有効イベントになる確認 |
 | P0-15 | TODO | MVP の失敗系と縦断フローを実端末で確認する | P0-10〜P0-14 | 権限拒否・通信断・外部 API 障害で二重発信せず、実通話証跡あり |
 
-注記(2026-09-26、解消済み): `requireHumanVerification` が要求する `human_verified` custom claim を設定するエンドポイントが無く、`POST /v1/emergency-events` が誰にとっても 403 になっていた問題は P0-08A のbackend実装で解消した。ただし Cloud Run への再デプロイと Android 側の IDKit 呼び出し実装が終わるまでは、実端末での human_verified 取得はまだできない。
+注記(2026-09-26、解消済み): `requireHumanVerification` が要求する `human_verified` custom claimはWorld ID proof成功後に設定され、物理端末で発信認可へ利用できる状態を確認済み。
 
 ## P0.5: 先回り設計（主線をブロックしない）
 
@@ -79,8 +79,7 @@
 
 Google provider、OAuth client、Twilio account、発信番号、OpenAI Secret、Cloud Run音声bridgeは構成済み。2026-09-25 にTwilio(`status: active`/`type: Full`)とGoogle provider(`enabled: true`)を Secret Manager 経由のAPI呼び出しで実測確認済み。主線の外部ボトルネックはテスト受電番号の受電者からの事前同意である。2026-09-26: GCP billing budgets（Monthly 2,000円/2nd limit 20,000円/Alert 10,000円、billing account 全体に適用）が既に設定済みであることを確認し、Twilio/OpenAI Realtimeの誤課金に対する安全網はすでにあると判断した（追加設定は不要）。
 
-1. Android 実端末でGoogleログインを確認し、P0-04を完了する。
-2. P0-05（位置保存）、P0-06（連絡先登録）、P0-09（Safety gate）を並列で進める。
-3. 同意済みテスト受電番号をアプリへ登録し、P0-10〜P0-13の実通話を縦断確認する。
+1. 物理端末でP0-05（位置保存）、P0-06（連絡先登録）、P0-09（Safety gate）を確認する。
+2. 同意済みテスト受電番号をアプリへ登録し、P0-10〜P0-13の実通話を縦断確認する。
+3. 物理Beacon長押しでP0-14の一回性を確認する。
 4. GATT（P1-08〜P1-15）は Beacon（P0-14）が主線完了後に完動してから着手する。着手前に P1-08 の決定事項を先に固める。
-5. P0-15 に入ったら、World ID の `pendingRequests` in-memory Map（P0-08A 参照）がscale-to-zeroで失われないか実機で確認する。

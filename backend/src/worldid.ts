@@ -45,6 +45,8 @@ type PendingWorldIdRequest = {
   request: IDKitRequest;
   uid: string;
   expiresAt: number;
+  action: string;
+  isReverification: boolean;
 };
 
 const pendingRequests = new Map<string, PendingWorldIdRequest>();
@@ -76,13 +78,15 @@ async function verifyAndGrantHumanClaim(
   db: Firestore,
   uid: string,
   rawResponse: unknown,
+  expectedAction: string = config.WORLD_ID_ACTION,
+  isReverification: boolean = false,
 ): Promise<"verified" | "invalid" | "replayed"> {
   const parsed = idkitResponseSchema.safeParse(rawResponse);
   if (!parsed.success) return "invalid";
   const idkitResponse = parsed.data;
   if (
     idkitResponse.environment !== config.WORLD_ID_ENVIRONMENT ||
-    (idkitResponse.action && idkitResponse.action !== config.WORLD_ID_ACTION)
+    idkitResponse.action !== expectedAction
   ) {
     return "invalid";
   }
@@ -96,29 +100,80 @@ async function verifyAndGrantHumanClaim(
     },
   );
   if (!verifyResponse.ok) {
-    app.log.warn({ status: verifyResponse.status, uid }, "World ID proof rejected");
+    const verifyError = await verifyResponse
+      .json()
+      .catch(() => ({ error: "non_json_verifier_response" })) as Record<string, unknown>;
+    app.log.warn(
+      {
+        status: verifyResponse.status,
+        uid,
+        verifierError: verifyError.error ?? verifyError.code ?? null,
+        verifierDetail: verifyError.detail ?? verifyError.message ?? null,
+        payloadKeys:
+          rawResponse && typeof rawResponse === "object"
+            ? Object.keys(rawResponse as Record<string, unknown>)
+            : [],
+      },
+      "World ID proof rejected",
+    );
     return "invalid";
   }
 
   const nullifiers = extractNullifiers(idkitResponse);
   if (nullifiers.length === 0) return "invalid";
-  try {
+  if (isReverification) {
     await Promise.all(
       nullifiers.map((nullifier) =>
-        db
-          .collection("world_id_nullifiers")
-          .doc(`${config.WORLD_ID_ACTION}_${nullifier}`)
-          .create({
-            action: config.WORLD_ID_ACTION,
-            nullifier,
-            uid,
-            verified_at: new Date().toISOString(),
-          }),
+        db.collection("world_id_reverifications").add({
+          uid,
+          action: expectedAction,
+          nullifier,
+          verified_at: new Date().toISOString(),
+        }),
       ),
     );
+  } else {
+  try {
+    await db.runTransaction(async (transaction) => {
+      const references = nullifiers.map((nullifier) => ({
+        nullifier,
+        reference: db
+          .collection("world_id_nullifiers")
+          .doc(`${expectedAction}_${nullifier}`),
+      }));
+      const snapshots = await Promise.all(
+        references.map(({ reference }) => transaction.get(reference)),
+      );
+
+      for (const snapshot of snapshots) {
+        if (snapshot.exists && snapshot.get("uid") !== uid) {
+          throw new Error("nullifier_owned_by_another_user");
+        }
+      }
+
+      references.forEach(({ nullifier, reference }, index) => {
+        const snapshot = snapshots[index];
+        if (snapshot?.exists) {
+          transaction.update(reference, {
+            last_verified_at: new Date().toISOString(),
+            verification_count: (snapshot.get("verification_count") as number | undefined ?? 1) + 1,
+          });
+          return;
+        }
+        transaction.create(reference, {
+          action: expectedAction,
+          nullifier,
+          uid,
+          verified_at: new Date().toISOString(),
+          last_verified_at: new Date().toISOString(),
+          verification_count: 1,
+        });
+      });
+    });
   } catch (error) {
-    app.log.warn({ error, uid }, "World ID nullifier replay rejected");
+    app.log.warn({ error, uid }, "World ID nullifier belongs to another user");
     return "replayed";
+  }
   }
 
   const existing = await getAuth().getUser(uid);
@@ -148,13 +203,15 @@ export function registerWorldIdRoutes(app: FastifyInstance, db: Firestore): void
 
   app.post("/v1/world-id/start", { preHandler: authenticate }, async (request, reply) => {
     const { signingKeyHex } = requireWorldIdConfig();
-    const signed = signRequest({
-      signingKeyHex,
-      action: config.WORLD_ID_ACTION,
-    });
+    const user = await getAuth().getUser(request.user.uid);
+    const isReverification = user.customClaims?.human_verified === true;
+    const action = isReverification
+      ? `${config.WORLD_ID_ACTION}-reverify-${randomUUID()}`
+      : config.WORLD_ID_ACTION;
+    const signed = signRequest({ signingKeyHex, action });
     const idkitRequest = await IDKit.request({
       app_id: config.WORLD_ID_APP_ID as `app_${string}`,
-      action: config.WORLD_ID_ACTION,
+      action,
       rp_context: {
         rp_id: config.WORLD_ID_RP_ID,
         nonce: signed.nonce,
@@ -171,6 +228,8 @@ export function registerWorldIdRoutes(app: FastifyInstance, db: Firestore): void
       request: idkitRequest,
       uid: request.user.uid,
       expiresAt: Date.now() + 15 * 60 * 1000,
+      action,
+      isReverification,
     });
     return reply.send({
       flow_id: flowId,
@@ -207,6 +266,8 @@ export function registerWorldIdRoutes(app: FastifyInstance, db: Firestore): void
         db,
         request.user.uid,
         status.result,
+        pending.action,
+        pending.isReverification,
       );
       pendingRequests.delete(flowId);
       if (outcome === "replayed") {

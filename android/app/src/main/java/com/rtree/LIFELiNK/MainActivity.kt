@@ -28,6 +28,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -75,8 +76,15 @@ private fun SetupScreen() {
     val apiClient = remember { LifeLinkApiClient() }
     val safetyGate = remember { EmergencySafetyGate(context) }
     val emergencyPreferences = remember { EmergencyPreferences(context) }
-    var status by remember { mutableStateOf("Googleでログインしてください") }
+    val initialUser = FirebaseAuth.getInstance().currentUser
+    var status by remember {
+        mutableStateOf(
+            initialUser?.let { "ログイン済み: ${it.email ?: it.uid}" }
+                ?: "Googleでログインしてください",
+        )
+    }
     var worldIdStatus by remember { mutableStateOf("World ID人間証明は未完了です") }
+    var pendingWorldIdFlowId by remember { mutableStateOf(emergencyPreferences.worldIdFlowId) }
     var locationText by remember { mutableStateOf("位置情報はまだ保存されていません") }
     var currentLocation by remember { mutableStateOf(emergencyPreferences.location) }
     var contactName by remember { mutableStateOf("") }
@@ -93,6 +101,50 @@ private fun SetupScreen() {
     var emergencyText by remember { mutableStateOf("緊急発信は待機中です") }
     var activeEmergencyEventId by remember { mutableStateOf<String?>(null) }
     var beaconText by remember { mutableStateOf("Beacon監視は停止中です") }
+
+    LaunchedEffect(initialUser?.uid) {
+        val claims = initialUser?.getIdToken(false)?.await()?.claims.orEmpty()
+        if (claims["human_verified"] == true) {
+            worldIdStatus = "World ID人間証明済み"
+        }
+    }
+
+    LaunchedEffect(pendingWorldIdFlowId) {
+        val flowId = pendingWorldIdFlowId ?: return@LaunchedEffect
+        while (true) {
+            val flowStatus = runCatching {
+                apiClient.getWorldIdFlowStatus(flowId)
+            }.getOrElse { error ->
+                if (error is ApiException && error.statusCode in setOf(404, 410)) {
+                    emergencyPreferences.worldIdFlowId = null
+                    pendingWorldIdFlowId = null
+                    worldIdStatus = "World ID証明の有効期限が切れました。もう一度お試しください"
+                    return@LaunchedEffect
+                }
+                worldIdStatus = "通信が一時的に不安定です。自動で再試行しています"
+                delay(WORLD_ID_STATUS_POLL_INTERVAL_MS)
+                continue
+            }
+            when (flowStatus.state) {
+                "verified" -> {
+                    FirebaseAuth.getInstance().currentUser?.getIdToken(true)?.await()
+                    emergencyPreferences.worldIdFlowId = null
+                    pendingWorldIdFlowId = null
+                    worldIdStatus = "World ID人間証明済み"
+                    return@LaunchedEffect
+                }
+                "failed" -> {
+                    emergencyPreferences.worldIdFlowId = null
+                    pendingWorldIdFlowId = null
+                    worldIdStatus = "World ID証明失敗: ${flowStatus.error ?: "unknown"}"
+                    return@LaunchedEffect
+                }
+                "waiting_for_connection" -> worldIdStatus = "World Appの接続を待っています"
+                "awaiting_confirmation" -> worldIdStatus = "World Appで確認中です"
+            }
+            delay(WORLD_ID_STATUS_POLL_INTERVAL_MS)
+        }
+    }
 
     val requestBluetoothPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
@@ -174,28 +226,10 @@ private fun SetupScreen() {
                 scope.launch {
                     runCatching {
                         val flow = apiClient.startWorldIdFlow()
-                        context.startActivity(
-                            Intent(Intent.ACTION_VIEW, Uri.parse(flow.connectorUri)),
-                        )
+                        emergencyPreferences.worldIdFlowId = flow.flowId
+                        pendingWorldIdFlowId = flow.flowId
+                        openWorldIdConnector(context, flow.connectorUri)
                         worldIdStatus = "World Appで人間証明を完了してください"
-                        while (true) {
-                            delay(WORLD_ID_STATUS_POLL_INTERVAL_MS)
-                            val flowStatus = apiClient.getWorldIdFlowStatus(flow.flowId)
-                            when (flowStatus.state) {
-                                "verified" -> {
-                                    FirebaseAuth.getInstance().currentUser
-                                        ?.getIdToken(true)
-                                        ?.await()
-                                    worldIdStatus = "World ID人間証明済み"
-                                    break
-                                }
-                                "failed" -> error(flowStatus.error ?: "World ID verification failed")
-                                "waiting_for_connection" ->
-                                    worldIdStatus = "World Appの接続を待っています"
-                                "awaiting_confirmation" ->
-                                    worldIdStatus = "World Appで確認中です"
-                            }
-                        }
                     }.onFailure { error ->
                         worldIdStatus = "World ID証明失敗: ${error.userMessage()}"
                     }
@@ -472,6 +506,19 @@ private fun Throwable.userMessage(): String = when (this) {
         else -> errorCode
     }
     else -> message ?: "不明なエラー"
+}
+
+private fun openWorldIdConnector(context: Context, connectorUri: String) {
+    val uri = Uri.parse(connectorUri)
+    val packageManager = context.packageManager
+    val worldPackages = listOf("org.world.id", "com.worldcoin")
+    val worldIntent = worldPackages
+        .asSequence()
+        .map { packageName ->
+            Intent(Intent.ACTION_VIEW, uri).setPackage(packageName)
+        }
+        .firstOrNull { intent -> intent.resolveActivity(packageManager) != null }
+    context.startActivity(worldIntent ?: Intent(Intent.ACTION_VIEW, uri))
 }
 
 private const val EMERGENCY_CONFIRM_WINDOW_MS = 10_000L
