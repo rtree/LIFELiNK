@@ -116,6 +116,24 @@ ssh araki@10.211.55.2 'zsh -lc "arduino-cli board list"'
 
 すべて 2026-09-25 に完了済み。
 
+## 2026-09-25 追加検証: android/ の host 上ビルド・起動確認
+
+`git pull` で android/ プロジェクトが host に届いた後、host 上で実際にビルドし、emulator へインストールして起動を確認済み。
+
+```bash
+ssh araki@10.211.55.2 'zsh -lc "cd ~/operations/LIFELiNK/android && ./gradlew assembleDebug"'
+# BUILD SUCCESSFUL（既存の Temurin 17 / Android SDK Build-Tools 35 自動導入で通った）
+
+ssh araki@10.211.55.2 'zsh -lc "
+emulator -avd beacon_api36 -no-window -no-audio -no-boot-anim &
+adb install -r ~/operations/LIFELiNK/android/app/build/outputs/apk/debug/app-debug.apk
+adb shell am start -n com.rtree.LIFELiNK/.MainActivity
+"'
+# topResumedActivity=...com.rtree.LIFELiNK/.MainActivity state=RESUMED を確認
+```
+
+以後、Android 側の実装が進んだら同じ手順（`git pull` → `./gradlew assembleDebug` → `adb install` → `adb shell am start`）で host 上のエミュレータで動作確認できる。検証後は `adb emu kill` でエミュレータを止め、resource を空けておく。
+
 ## 既知の制約・未決事項
 
 - host の GitHub 認証は未設定。host からの push が必要になった場合は、host 専用の deploy key か PAT を発行し、Secret として扱う（チャットやリポジトリに書かない）。
