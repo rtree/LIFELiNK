@@ -22,7 +22,7 @@
 | P0-11 | IN PROGRESS | Twilio Media Streams と OpenAI Realtime bridge を実装する | P0-08、P0-10 | 実通話で双方向会話が成立 |
 | P0-12 | IN PROGRESS | 鮮度付き初回発話を実装する | P0-05、P0-11 | backendの構造化発話は実装済み。残りは実通話で住所、座標、精度、鮮度の順序を確認 |
 | P0-13 | IN PROGRESS | Android の通話中メモ・位置更新を AI へ注入する | P0-11、P0-12 | 認証・所有権・Call SID・状態検証、冪等保存、Realtime注入、Android送信は実装済み。残りは実通話確認 |
-| P0-14 | TODO | BLE Beacon 経路（専用 UUID/Major/Minor 広告、`BeaconReceiver`/Filter/PendingIntent、重複排除）を Safety gate へ接続する | P0-09 | 長押し一回が Android で一回の有効イベントになり、Beacon と画面ボタンが同じ発信経路を利用する。2026-09-26: UUID/Major/Minor を `doc/plan.md` 6b 章に確定記録し、ブロック解除済み（UUID `D93DBA9A-40E6-4C73-A0DA-BF416BFE0DBF`、Major 1、Minor 1） |
+| P0-14 | IN PROGRESS | BLE Beacon 経路（専用 UUID/Major/Minor 広告、`BeaconReceiver`/Filter/PendingIntent、重複排除）を Safety gate へ接続する | P0-09 | 確定UUID/Major/Minorの完全一致filter、PendingIntent receiver、30秒広告バースト重複排除、共通Safety gate/API接続は実装・debug build済み。残りは実機の長押し一回がAndroidで一回の有効イベントになる確認 |
 | P0-15 | TODO | MVP の失敗系と縦断フローを実端末で確認する | P0-10〜P0-14 | 権限拒否・通信断・外部 API 障害で二重発信せず、実通話証跡あり |
 
 注記(2026-09-26、解消済み): `requireHumanVerification` が要求する `human_verified` custom claim を設定するエンドポイントが無く、`POST /v1/emergency-events` が誰にとっても 403 になっていた問題は P0-08A のbackend実装で解消した。ただし Cloud Run への再デプロイと Android 側の IDKit 呼び出し実装が終わるまでは、実端末での human_verified 取得はまだできない。
@@ -35,6 +35,7 @@
 | P0.5-02 | DONE | `firestore.rules`/`firestore.indexes.json` を実プロジェクトへデプロイする | P0.5-01、P0-03 | 2026-09-26: `firebase deploy --only firestore:rules,firestore:indexes` を実行。それまで release が 0 件（default rules のまま）だったことを Firebase Rules API で確認した上でデプロイし、`projects/.../releases/cloud.firestore` が有効化されたことを確認済み |
 | P0.5-03 | DONE | GPT Live 状況ストア（Firestore 正本 / Realtime 作業メモリ / Responses delegation の三層構成）のデータ構造と役割分担を確定する | P0.5-01 | 決定を `doc/plan.md` 8a 章に反映済み。`emergencySessions`/`facts`/`state/current`/`timeline`/`delegations` のスキーマと、P0 の `emergency_events`/`updates` との対応関係（8a 章「P0 の emergency_events/updates との関係」）を明記し、P0 実装への変更は不要 |
 | P0.5-04 | DONE | `emergencySessions` 系サブコレクションと `world_id_nullifiers` の Firestore security rules を先行デプロイする | P0.5-03、P0.5-02 | 2026-09-26: P2 実装が始まる前に、これらのコレクションが default rules で開いたままにならないよう `firestore.rules` へ owner/participant 読み取り・全書き込み拒否のルールを追加し `firebase deploy --only firestore:rules` で反映済み |
+| P0.5-05 | DONE | フル UI モック（`doc/uimock/` + https://pratana-lab.blush.jp/2026tokyo/mock-en/ ）を最終系から逆算し、画面インベントリと未決の 3 論点を確定する | なし | 決定を `doc/plan.md` 4a 章に反映済み。1-1〜3-8 の全画面を P0/P1/P2 にマッピングし、`nickname`/`area` フィールド追加とローカル 2 段階音声アナウンスという 2 つの新規要件、および「警察自動通報」「通話録音共有」「友人 UI を自作するか実 Discord を使うか」という 3 つの未決論点を明記した。Android UI 実装自体は他チームが P0 で進行中のため、ここでは着手しない |
 
 注記: P0-13（通話中メモ・位置更新）を実装する際は、`updates` ドキュメントのフィールド名を `doc/plan.md` 6a 章の拡張スキーマ（`type`、`author_type`、`author_uid` などを含む）に合わせること。P1 での friend_comment / transcript 追加時にフィールド追加のみで済ませるため。
 
@@ -42,11 +43,14 @@
 
 | ID | 状態 | タスク | 依存 | 完了条件 |
 | --- | --- | --- | --- | --- |
-| P1-02 | TODO | `friend_links` コレクションと招待コード発行・承認 API（`/v1/friends/*`）を実装する | P0-15、P0.5-01 | 相互承認済みの友人一覧が取得でき、`pending`/`accepted`/`blocked` を切り替えられる |
+| P1-01 | TODO | フル UI モックの未決 3 論点（`doc/plan.md` 4a 章）を人間と確定する: (1) 「警察へ自動通報する」文言・実装範囲、(2) 通話録音・書き起こしを友人へ共有するか、(3) 友人共有 UI をアプリ内自作（Option A）にするか実 Discord bot（Option B）にするか | P0-15 | 決定を `doc/plan.md` 4a・12・13 章に反映済み。P1-02〜P1-06 は決定後の方式に合わせて着手する |
+| P1-02 | TODO | `friend_links` コレクションと招待コード発行・承認 API（`/v1/friends/*`）を実装する（P1-01 で Option A を選んだ場合） | P0-15、P0.5-01、P1-01 | 相互承認済みの友人一覧が取得でき、`pending`/`accepted`/`blocked` を切り替えられる |
 | P1-03 | TODO | `emergency_events.participant_uids` のスナップショット生成と Firestore security rules を実装する | P1-02 | イベント作成時点の友人だけが該当イベントを読み取れ、後から友人になった uid はアクセスできないことを確認 |
 | P1-04 | TODO | `updates` フィードへ `friend_comment`・`transcript_contact`・`transcript_ai` を書き込む処理を実装する（入力音声 transcription 有効化を含む） | P1-03、P0-11 | 通話中の両者の発話と友人コメントが同一フィードに時系列で保存される |
 | P1-05 | TODO | 友人コメントを `conversation.item.create` + `response.create` で進行中の Realtime セッションへ注入する | P1-04 | 通話を切らずに友人コメントの内容が相手へ音声で伝わる |
-| P1-06 | TODO | Discord 風 UI（友人登録画面、招待コード入力、通話履歴・ライブフィード画面、コメント入力欄）を実装する | P1-02〜P1-05 | 自分と共有されたイベントを時系列表示し、通話中にコメント投稿できる |
+| P1-06 | TODO | 友人共有 UI を実装する（Option A: アプリ内 Discord 風画面 / Option B: 実 Discord bot 連携。P1-01 の決定に従う） | P1-01、P1-02〜P1-05（Option A）または Discord bot 基盤構築（Option B） | 自分と共有されたイベントを時系列表示し、通話中にコメント投稿できる。Option B の場合はアプリ未インストールの友人が Discord だけで受信・返信できる |
+| P1-06a | TODO | `users/{uid}` へ `nickname`/`area` フィールドを追加し、プロフィール設定画面（モック 1-5）を実装する | P0-15 | ニックネームとエリアを保存・再取得でき、エリアを最寄り警察署解決（3-6）や住所表示に利用できる |
+| P1-06b | TODO | 端末ローカルの 2 段階音声アナウンス（送信時 stage1・接続時 stage2、JP/EN/両方、Silent SOS トグル）を実装する | P0-09、P0-13（`in-progress`/`answered` を判定する Twilio status） | 送信直後に stage1 が即時発話され、Twilio status が `answered`/`in-progress` を報告した時だけ stage2 が発話される。Silent SOS 有効時は両方無音になる |
 | P1-07 | TODO | Android 周辺音声の扱いを設計・実装する | P0-15、同意・法務判断 | 明示同意と状態表示のもとで音声を通話へ追加可能 |
 | P1-08 | TODO | GATT 統合前の決定事項（`doc/plan.md` 13 章）を人間と確定する（minSdk/対象 Samsung 機種、firmware MAC 方式、Beacon 広告への event identity 同居可否、location FGS 採用有無、Companion Device/battery optimization の Play policy 方針、2 時間後の停止方針） | P0-15 完了（Beacon 完動） | 決定を `doc/plan.md` 6c 章・13 章に反映済み |
 | P1-09 | TODO | `ble-core`: GATT/Beacon 共通の protocol parser、`connectionGeneration`、状態 reducer、重複排除を実装する（Android API 非依存、unit test 付き） | P1-08 | epoch/eventId/generation の妥当性判定が unit test で再現できる |
