@@ -123,6 +123,18 @@
    - **Option B（本モック）**: 実際の Discord サーバー・Bot を使う。友人は Discord に参加するだけでよく（README のストレッチゴールと一致）、位置・地図・音声・書き起こしは Discord の埋め込み/添付として bot が投稿する。実装は Discord Developer Portal での bot 作成、bot token を Secret Manager 管理、Discord API（メッセージ送信、ボタン付き Embed、必要なら Interactions）の実装に置き換わる。
    - Option B はアプリインストール不要という強い訴求点を実現でき、UI 実装量も Compose の自作チャットより少ない可能性が高い。ただし Discord 側のレート制限・bot 権限・サーバー運用（招待リンクの発行・失効）という新しい外部依存が増える。どちらを採るかで P1 のタスク内容が大きく変わるため、着手前に決定する。
 
+### Discord 個別連絡の候補設計（2026-09-26、提案段階・P1 の判断待ち）
+
+ユーザー希望: アプリから Discord を接続し、緊急連絡したい友人を登録し、電話発信と並行して Bot が状況を伝え、返信を `emergency_events/{id}/updates` の参考情報に残す。これは従来の「サーバー全員に投稿する Option B」と異なる **個別のオプトイン済み Discord 連絡先** 方式であり、P1-01 で公開範囲・通話先との関係を確定する。P0 の電話先 `contact_id` は維持し、Discord 通知の成功は電話発信成功の条件にしない。
+
+- **API 制約**: 通常の OAuth2 `identify` はログインした本人だけ、`connections` は外部連携アカウントだけを返す。友人一覧用 `relationships.read` は Discord Social SDK の利用申請が必要。承認なしに「Join Discord → Discord の全 Friends を表示」は実装しない。ユーザートークンや self-bot で非公開 API を呼ばない。公式資料: https://docs.discord.com/developers/topics/oauth2#shared-resources-oauth2-scopes
+- **推奨登録体験**: アプリの「Discord 連携」は発信者本人の `identify`（任意）。「Discord の連絡先を招待」で期限付き・一回限りの招待 URL を共有し、**受信者本人** が Discord `identify` を認可するか Bot のリンク用コマンドを実行する。サーバー側で発行者の Firebase UID と招待を照合し、OAuth `state` または署名検証済み Interaction の `user.id` から受信者の Discord ID を取得する。相手が緊急通知と位置共有を明示承認して初めて登録完了。ユーザー名の手入力だけでは本人確認にならない。アプリ画面の一覧は「連携済み・承認済み連絡先」とし、Discord 全友人一覧とは呼ばない。共通サーバーから選ぶ案も友人判定や本人の受信同意の代わりにはならない。
+- **通知と返信**: 新規イベントに対し選択済みの受信者ごとに一回だけ Bot の DM を試み、最小限の位置・時刻・状況と地図リンク、イベントに紐づく「状況を返信」ボタンを送る。DM は相手の設定や共通サーバーの有無等で失敗し得る（例: `50007`、`50278`）。送信成功は既読・通知到達を意味しない。署名検証済み Discord Interaction のボタン→モーダルで返信を受け、`interaction.id` で重複排除し、`event_id`・許可済み `discord_user_id`・有効期限を検証後 `type: friend_comment`、`author_type: friend`、`source: discord` として保存する。Bot は全イベントの作成や電話操作を許可しない。参考情報として通話中の AI に渡す場合も、未確認の第三者情報として区別し、AI への自動注入・電話先への読み上げは別途同意を決める。
+- **自由文返信を求める場合**: Bot DM の `MESSAGE_CREATE` を受ける Gateway 常時接続が別途必要。DM 本文は `MESSAGE_CONTENT` privileged intent の例外だが、HTTP Interaction endpoint だけでは自由文 DM を受信できない。Cloud Run のスケールゼロ前提とは相性が悪いため、まずは署名付き HTTP Interaction のモーダル返信を候補にする。公式資料: https://docs.discord.com/developers/events/gateway#message-content-intent ・ https://docs.discord.com/developers/interactions/receiving-and-responding#receiving-an-interaction
+- **安全性・検証**: Bot token と OAuth client secret は Secret Manager に限定。Firestore 正本に宛先スナップショット・通知配送状態（未送信/送信済み/失敗、Discord message ID）を持ち、再試行・429・タイムアウト時の重複通知を抑える。送信済み/失敗をアプリに区別表示し、事前に実機で招待→受信同意→テスト DM→返信→イベント表示を通す。Discord は緊急連絡の唯一の経路にせず、電話を主経路とする。位置・発話・返信の公開範囲と保存/削除期間は P1 着手前に確認する。
+
+未決: (1) 電話相手と Discord の受信者は同一人物か別の支援者か、何名までか、(2) Discord 連携を必須にするか任意にするか、(3) 返信を参考情報の保存のみとするか通話中 AI にも渡すか、(4) Social SDK の審査申請を試すか。これらが確定するまで実装方式としては採用済みとみなさない。
+
 ### 実装しない場合の注記
 
 UI 全体の完成形を先に見る価値はあるが、本節の P1/P2 項目は主線（P0）を止めない。論点 1 は決定済みだが、論点 2・3 が未決のままでも P0 の画面・データ設計には影響しない。
