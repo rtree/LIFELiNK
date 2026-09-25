@@ -593,12 +593,10 @@ BLE 層から電話 API や Firebase を直接呼ばない。Android Controller 
 
 実装開始前に人間が決める必要がある項目は次のとおり。その他は合理的な初期値を Agent が選び、判断をこの文書へ追記する。
 
-- GCP region と Firestore location
-- Twilio の発信国、発信番号、テスト受電番号
+- Twilio のテスト受電番号と受電者の同意
 - 位置情報を何分で「古い」と扱うか
 - 誤操作防止 UI を長押し、確認カウントダウン、スライドのどれにするか
 - イベント、位置、メモの保持期間
-- Firebase Authentication の Google provider有効化とOAuth同意画面のサポートメール選択
 
 Phase 7（GATT）着手前に決める項目（6c 章参照）:
 
