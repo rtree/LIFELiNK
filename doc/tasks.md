@@ -25,11 +25,14 @@
 | P0-14 | TODO | BLE Beacon 経路（専用 UUID/Major/Minor 広告、`BeaconReceiver`/Filter/PendingIntent、重複排除）を Safety gate へ接続する | P0-09、Beacon 機器 | 長押し一回が Android で一回の有効イベントになり、Beacon と画面ボタンが同じ発信経路を利用する |
 | P0-15 | TODO | MVP の失敗系と縦断フローを実端末で確認する | P0-10〜P0-14 | 権限拒否・通信断・外部 API 障害で二重発信せず、実通話証跡あり |
 
+注記(2026-09-26): `backend/src/auth.ts` の `requireHumanVerification` は `request.user.human_verified === true` を必須にしているが、この custom claim を設定する World ID proof 検証エンドポイント／`setCustomUserClaims` 呼び出しはまだ backend に存在しない（`grep` で未検出）。つまり P0-08A が完了するまで `POST /v1/emergency-events` は誰であっても 403 になり、P0-10〜P0-15 の実通話テストが一切できない。P0-08A の実装を最優先で通すか、暫定的に human_verified 要件を一時的に緩める判断が必要（`doc/plan.md` 3 章は元々 World ID を実通話成立まで主線から外す方針だったが、575 行目の記述で「延期しない」に変更済みのため、現状はこの変更の帰結として認識しておくこと）。
+
 ## P0.5: 先回り設計（主線をブロックしない）
 
 | ID | 状態 | タスク | 依存 | 完了条件 |
 | --- | --- | --- | --- | --- |
 | P0.5-01 | DONE | 友人共有・Discord 風フィード・OpenAI Realtime 注入を前提にしたデータモデル（`friend_links`、`emergency_events.participant_uids`、`updates` の拡張スキーマ）と UI 画面遷移を確定する | なし | 決定を `doc/plan.md` の 4 章・6a 章・5 章・9 章に反映済み。P0-13 は拡張スキーマの `note`/`location` サブセットのみ実装すればよく、P1 で作り直しが不要 |
+| P0.5-02 | DONE | `firestore.rules`/`firestore.indexes.json` を実プロジェクトへデプロイする | P0.5-01、P0-03 | 2026-09-26: `firebase deploy --only firestore:rules,firestore:indexes` を実行。それまで release が 0 件（default rules のまま）だったことを Firebase Rules API で確認した上でデプロイし、`projects/.../releases/cloud.firestore` が有効化されたことを確認済み |
 
 注記: P0-13（通話中メモ・位置更新）を実装する際は、`updates` ドキュメントのフィールド名を `doc/plan.md` 6a 章の拡張スキーマ（`type`、`author_type`、`author_uid` などを含む）に合わせること。P1 での friend_comment / transcript 追加時にフィールド追加のみで済ませるため。
 
