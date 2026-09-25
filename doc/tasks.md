@@ -22,7 +22,7 @@
 | P0-11 | DONE | Twilio Media Streams と OpenAI Realtime bridge を実装する | P0-08、P0-10 | 2026-09-26: 159秒の実通話でStream started/stopped、受話7,931フレーム、相手発話26ターン、AI出力1,163フレームを確認。相手発話時にTwilio出力bufferをclearする割り込み処理を実装 |
 | P0-12 | DONE | 鮮度付き初回発話を実装する | P0-05、P0-11 | 物理端末で取得した都道府県と情報の鮮度を実通話の初回AI音声で再生確認。座標・精度・詳細住所は発話しない |
 | P0-13 | DONE | Android の通話中メモ・位置更新を AI へ注入する | P0-11、P0-12 | 2026-09-26: 167秒の実通話中にAndroidから追加メモを送信し、API HTTP 202、Firestore保存・AI配達時刻、受電側でのAI音声読み上げを確認。受話8,315フレーム、AI出力511フレーム、発話4ターンを記録 |
-| P0-14 | IN PROGRESS | BLE Beacon 経路（専用 UUID/Major/Minor 広告、`BeaconReceiver`/Filter/PendingIntent、重複排除）を Safety gate へ接続する | P0-09 | 確定UUID/Major/Minorの完全一致filter、PendingIntent receiver、30秒広告バースト重複排除、共通Safety gate/API接続は実装・debug build済み。残りは実機の長押し一回がAndroidで一回の有効イベントになる確認 |
+| P0-14 | DONE | BLE Beacon 経路（専用 UUID/Major/Minor 広告、`BeaconReceiver`/Filter/PendingIntent、重複排除）を Safety gate へ接続する | P0-09 | 2026-09-26: 物理広告をcompany ID `0x004C`・iBeacon prefix `0x02 0x15`として2回観測し、実UUID/Major/Minorへ完全一致filterを更新。長押し1回から`trigger_type: ble`のeventと25秒の実通話が1件だけ発生し、後続広告は30秒窓ですべて重複抑止された |
 | P0-15 | TODO | MVP の失敗系と縦断フローを実端末で確認する | P0-10〜P0-14 | 権限拒否・通信断・外部 API 障害で二重発信せず、実通話証跡あり |
 
 注記(2026-09-26、解消済み): `requireHumanVerification` が要求する `human_verified` custom claimはWorld ID proof成功後に設定され、物理端末で発信認可へ利用できる状態を確認済み。
@@ -39,6 +39,7 @@
 | P0.5-06 | DONE | P2 の `emergencySessions` のコレクション配置を確定する | P0.5-03、P0.5-04 | 2026-09-26: 一度 `users/{uid}` 配下にネストする案を検討したが、友人共有（`participant_uids`）が主要ユースケースであり collectionGroup クエリと webhook 経由の owner_uid 伝達が必要になる点を重く見て、**ルート直下の `emergencySessions/{session_id}`（P0 の `emergency_events` と同じ配置）に確定**した。`doc/plan.md` 8a 章と `firestore.rules` をルート直下パターンへ戻し `firebase deploy --only firestore:rules` で再デプロイ・compile成功を確認済み |
 | P0.5-07 | DONE | GPS 座標・位置精度を Firestore へ保存しない、住所は都道府県レベルまでしか解決・発話しないハッカソン向けプライバシー方針を実装する | なし | 2026-09-26: `android/.../MainActivity.kt` の逆ジオコーディングを `getAddressLine(0)`（番地まで含む全体住所）から `adminArea`（都道府県のみ）へ変更。`backend/src/server.ts` に `sanitizeLocationForPersistence()` を追加し `/v1/locations`・`emergency_events.location_snapshot`・`updates.payload` の3箇所で緯度経度・精度を保存前に除去。`backend/src/voice.ts` の `buildInitialMessage` から座標・精度の読み上げ文を削除。Fastify logger の `redact` に `latitude`/`longitude`/`accuracy_m` 系パスを追加しログにも残さないようにした。typecheck/build green。`doc/plan.md` 6・8・12 章に方針と理由（デモでの実位置公開を避けるため）を明記 |
 | P0.5-08 | DONE | P2（8a章）のスキーマを「以後変更しない」ものとして厳密化・凍結し、想定クエリ向けの Firestore 複合インデックスを先行デプロイする | P0.5-06 | 2026-09-26: `facts.value` の `kind` 別 shape、`state/current.active_alerts`、`delegations.result` の型を明記（曖昧な `map`/無型フィールドを解消）。Android が Firestore を直接 read・write は必ず backend API 経由という契約を 8a 章「認可・安全」冒頭に固定契約として明記。`emergencySessions`/`emergency_events` の `owner_uid`/`participant_uids` × 日時ソート用の複合インデックスを `firestore.indexes.json` に追加し `firebase deploy --only firestore:indexes,firestore:rules` で反映済み。これにより「モックを作らず本物のスキーマに実装を積み上げる」戦略の前提（スキーマが実装中に動かない）が整った |
+| P0.5-09 | DONE | API/データ設計を見直す前に主要ユースケースを列挙し、現行設計との整合を確認する | P0.5-08 | `doc/plan.md` 1a 章に 7 個のユースケースと現状の対応状況を記録。3 件の不足を発見: (1) 物理ボタンの初期リンク・再登録フロー未設計（Beacon は個体識別を `users/{uid}` に紐付けないと他ユーザーの物理ボタンにも誤反応する実害あり）、(2) プライバシー方針変更で `accuracy_m` まで一律破棄したのは行き過ぎで復活させるべき、(3) 友人リンクは「Option A か B」の二択ではなく Discord identity と LIFELiNK Google アカウントの両方を同時サポートする一般化が必要。スキーマ自体はまだ変更せず、次回の API/データ設計見直しへ引き継ぐ |
 
 注記: P0-13（通話中メモ・位置更新）を実装する際は、`updates` ドキュメントのフィールド名を `doc/plan.md` 6a 章の拡張スキーマ（`type`、`author_type`、`author_uid` などを含む）に合わせること。P1 での friend_comment / transcript 追加時にフィールド追加のみで済ませるため。
 
@@ -48,7 +49,7 @@
 
 | ID | 状態 | タスク | 依存 | 完了条件 |
 | --- | --- | --- | --- | --- |
-| P1-01 | TODO | フル UI モックの残る未決 2 論点（`doc/plan.md` 4a 章、論点 1（警察自動通報の文言）は 2026-09-26 に人間が「登録済み緊急連絡先に限定し、警察を目標にしない」と決定済み）を確定する: (1) 通話録音・書き起こしを友人へ共有するか、(2) 友人共有 UI をアプリ内自作（Option A）にするか実 Discord bot（Option B）にするか | P0-15 | ハッカソン提出物としては上記方針で保留。決定を `doc/plan.md` 4a 章に反映済み |
+| P1-01 | TODO | フル UI モックの残る未決 2 論点（`doc/plan.md` 4a 章、論点 1（警察自動通報の文言）は 2026-09-26 に人間が「登録済み緊急連絡先に限定し、警察を目標にしない」と決定済み）を確定する: (1) 通話録音・書き起こしを友人へ共有するか、(2) 友人共有 UI をアプリ内自作（Option A）にするか実 Discord bot（Option B）にするか。**2026-09-26 追記**: P0.5-09 のユースケース精査で、実際は Option A/B の二択ではなく「Discord identity」と「LIFELiNK Google アカウント」の両方の友人リンク手段を同時サポートする前提だと判明。次回の API/データ設計見直しで「両方サポートする前提でどちらから実装するか」に決定の枠組みを直す | P0-15 | 決定を `doc/plan.md` 4a 章・1a 章に反映済み |
 | P1-01a | TODO | Discord 個別連絡先方式の可否を決定する（4a 章の候補設計）。電話先と DM 受信者の関係・人数・通知同意・返信の AI 注入有無・Social SDK 申請要否を確定する | P1-01、受信者の事前同意 | 友人一覧に通常 OAuth ではアクセスできない制約を踏まえ、招待・本人確認・公開範囲・フォールバックを合意して `doc/plan.md` に記録 |
 | P1-01b | TODO | P1-01a で Discord 個別連絡を選んだ場合、招待→受信者 opt-in→Bot テスト DM→モーダル返信→`updates` 保存の最小縦断フローを実装・実測する | P1-01a、P0-15 | 事前同意済みの相手で配送成功/失敗が区別され、返信が許可したイベントに一回だけ記録される。電話発信は Discord 障害でも継続する |
 | P1-02 | TODO | `friend_links` コレクションと招待コード発行・承認 API（`/v1/friends/*`）を実装する（P1-01 で Option A を選んだ場合） | P2-01/P2-02完了（最小パス、delegationsは不要）、P0.5-01、P1-01 | 相互承認済みの友人一覧が取得でき、`pending`/`accepted`/`blocked` を切り替えられる |
