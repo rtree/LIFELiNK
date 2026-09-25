@@ -36,9 +36,13 @@ await app.register(websocket);
 
 registerWorldIdRoutes(app, db);
 
-registerMediaBridge(app, async (eventId) => {
+registerMediaBridge(app, async (eventId, callSid) => {
   const event = await db.collection("emergency_events").doc(eventId).get();
-  if (!event.exists) {
+  if (
+    !event.exists ||
+    event.get("twilio_call_sid") !== callSid ||
+    !new Set(["dialing", "in_progress"]).has(event.get("state") as string)
+  ) {
     return null;
   }
   const location = event.get("location_snapshot") as
@@ -377,6 +381,14 @@ app.post("/v1/twilio/status", async (request, reply) => {
   if (!query.emergencyEventId || !body.CallSid || !body.CallStatus) {
     return reply.code(400).send({ error: "invalid_twilio_status" });
   }
+  const eventRef = db.collection("emergency_events").doc(query.emergencyEventId);
+  const event = await eventRef.get();
+  if (!event.exists) {
+    return reply.code(404).send({ error: "emergency_event_not_found" });
+  }
+  if (event.get("twilio_call_sid") !== body.CallSid) {
+    return reply.code(409).send({ error: "twilio_call_sid_mismatch" });
+  }
   const stateByStatus: Record<string, string> = {
     initiated: "dialing",
     ringing: "dialing",
@@ -387,7 +399,7 @@ app.post("/v1/twilio/status", async (request, reply) => {
     "no-answer": "failed",
     canceled: "failed",
   };
-  await db.collection("emergency_events").doc(query.emergencyEventId).update({
+  await eventRef.update({
     state: stateByStatus[body.CallStatus] ?? body.CallStatus,
     twilio_call_sid: body.CallSid,
     updated_at: FieldValue.serverTimestamp(),

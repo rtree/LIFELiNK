@@ -16,6 +16,7 @@ type InitialContext = {
 type TwilioStartMessage = {
   event: "start";
   start: {
+    callSid: string;
     streamSid: string;
     customParameters?: { emergencyEventId?: string };
   };
@@ -132,7 +133,10 @@ function buildInitialMessage(context: InitialContext): string {
 
 export function registerMediaBridge(
   app: FastifyInstance,
-  loadInitialContext: (eventId: string) => Promise<InitialContext | null>,
+  loadInitialContext: (
+    eventId: string,
+    callSid: string,
+  ) => Promise<InitialContext | null>,
 ): void {
   app.get("/v1/twilio/media", { websocket: true }, (twilioSocket, request) => {
     if (!isValidTwilioRequest(request)) {
@@ -211,7 +215,10 @@ export function registerMediaBridge(
           twilioSocket.close(1008, "missing emergency event");
           return;
         }
-        const context = await loadInitialContext(emergencyEventId);
+        const context = await loadInitialContext(
+          emergencyEventId,
+          start.start.callSid,
+        );
         if (!context) {
           twilioSocket.close(1008, "emergency event not found");
           return;
