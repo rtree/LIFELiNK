@@ -16,16 +16,16 @@
 | P0-06 | IN PROGRESS | 緊急連絡先登録と `contact_id` 解決を実装する | P0-03、P0-04 | Android登録UIと所有者配下へのbackend保存は実装済み。残りは実端末確認 |
 | P0-07 | DONE | Twilio account、発信番号、テスト受電番号を準備する | 人間の契約・同意 | 2026-09-25: Secret Manager 経由で Twilio Account API を確認。`status: active`、`type: Full`（trial 制限なし）、残高 1814.52 JPY、`key-twilio-from-number` が voice 対応の in-use 番号であることを確認済み。Cloud Run `lifelink-backend` に 4 secret（sid/authToken/from-number/openai）が正しく bind 済み。実際のテスト発信自体は発信先の事前同意取得後に P0-15 で実施する |
 | P0-08 | DONE | OpenAI API key を Secret Manager から Cloud Run へ割り当てる | P0-03 | Cloud Run のみが Secret を参照可能 |
-| P0-08A | IN PROGRESS | World ID app、RP、action、proof検証と発信認可を実装する | RP登録・署名鍵のSecret Manager保存・Cloud Run割当は完了 | Googleログイン済みかつ人間性証明済みユーザーだけが発信可能 |
+| P0-08A | IN PROGRESS | World ID app、RP、action、proof検証と発信認可を実装する | RP登録・署名鍵のSecret Manager保存・Cloud Run割当は完了 | 2026-09-26: backend側実装完了（`backend/src/worldid.ts`: `POST /v1/world-id/sign`でRP署名発行、`POST /v1/world-id/verify`で`/api/v4/verify/{rp_id}`へproofをそのまま転送し、Firestore `create()`でnullifier再利用を拒否し、成功時にFirebase custom claim `human_verified: true`を設定）。production action `verify-emergency-caller`（`action_v4_5706099fb9c9a19bd9ee0ed72efab550`）をDeveloper Portal MCPで作成しregistered確認済み。typecheck/build green。残りは (1) Cloud Runへの再デプロイと`WORLD_ID_*`環境変数反映の確認、(2) Android側でIDKit widgetを開き`/v1/world-id/sign`→IDKit→`/v1/world-id/verify`を呼ぶ実装、(3) 検証成功後にAndroidが`getIdToken(true)`でトークンを強制更新して`human_verified`クレームを反映すること |
 | P0-09 | IN PROGRESS | `EmergencyTrigger` と Android Safety gate を実装する | P0-04 | 永続event IDと二段階確認の画面ボタンは実装済み。残りはBLE共通interface化と実端末確認 |
 | P0-10 | IN PROGRESS | backend の冪等イベント作成と Twilio 発信を実装する | P0-06、P0-07、P0-08A、P0-09 | 連打・HTTP 再送でも実着信が一回だけ |
 | P0-11 | IN PROGRESS | Twilio Media Streams と OpenAI Realtime bridge を実装する | P0-08、P0-10 | 実通話で双方向会話が成立 |
 | P0-12 | IN PROGRESS | 鮮度付き初回発話を実装する | P0-05、P0-11 | backendの構造化発話は実装済み。残りは実通話で住所、座標、精度、鮮度の順序を確認 |
 | P0-13 | IN PROGRESS | Android の通話中メモ・位置更新を AI へ注入する | P0-11、P0-12 | 認証・所有権・Call SID・状態検証、冪等保存、Realtime注入、Android送信は実装済み。残りは実通話確認 |
-| P0-14 | TODO | BLE Beacon 経路（専用 UUID/Major/Minor 広告、`BeaconReceiver`/Filter/PendingIntent、重複排除）を Safety gate へ接続する | P0-09、Beacon 機器 | 長押し一回が Android で一回の有効イベントになり、Beacon と画面ボタンが同じ発信経路を利用する |
+| P0-14 | BLOCKED | BLE Beacon 経路（専用 UUID/Major/Minor 広告、`BeaconReceiver`/Filter/PendingIntent、重複排除）を Safety gate へ接続する | P0-09、Beacon の専用 UUID/Major/Minor 実値 | 長押し一回が Android で一回の有効イベントになり、Beacon と画面ボタンが同じ発信経路を利用する |
 | P0-15 | TODO | MVP の失敗系と縦断フローを実端末で確認する | P0-10〜P0-14 | 権限拒否・通信断・外部 API 障害で二重発信せず、実通話証跡あり |
 
-注記(2026-09-26): `backend/src/auth.ts` の `requireHumanVerification` は `request.user.human_verified === true` を必須にしているが、この custom claim を設定する World ID proof 検証エンドポイント／`setCustomUserClaims` 呼び出しはまだ backend に存在しない（`grep` で未検出）。つまり P0-08A が完了するまで `POST /v1/emergency-events` は誰であっても 403 になり、P0-10〜P0-15 の実通話テストが一切できない。P0-08A の実装を最優先で通すか、暫定的に human_verified 要件を一時的に緩める判断が必要（`doc/plan.md` 3 章は元々 World ID を実通話成立まで主線から外す方針だったが、575 行目の記述で「延期しない」に変更済みのため、現状はこの変更の帰結として認識しておくこと）。
+注記(2026-09-26、解消済み): `requireHumanVerification` が要求する `human_verified` custom claim を設定するエンドポイントが無く、`POST /v1/emergency-events` が誰にとっても 403 になっていた問題は P0-08A のbackend実装で解消した。ただし Cloud Run への再デプロイと Android 側の IDKit 呼び出し実装が終わるまでは、実端末での human_verified 取得はまだできない。
 
 ## P0.5: 先回り設計（主線をブロックしない）
 
