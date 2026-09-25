@@ -135,6 +135,8 @@
 
 未決: (1) 電話相手と Discord の受信者は同一人物か別の支援者か、何名までか、(2) Discord 連携を必須にするか任意にするか、(3) 返信を参考情報の保存のみとするか通話中 AI にも渡すか、(4) Social SDK の審査申請を試すか。これらが確定するまで実装方式としては採用済みとみなさない。
 
+**保存場所（6 章の原則に従う）**: 承認済みの受信者登録は本人だけが読み書きする私的データなので `users/{uid}/discordContacts/{contact_id}`（`discord_user_id`、`display_name_snapshot`、`consented_at`、`status: pending|active|revoked` 程度）に置く。招待トークンも同じ理由で `users/{uid}/discordInvites/{invite_id}` に置き、ルート直下には置かない。一方、DM 経由の返信そのものは 6a 章の `updates` と同じ理由でイベントの共有フィード（`emergency_events/{id}/updates`）に書く（上記の「通知と返信」のとおり）。
+
 ### 実装しない場合の注記
 
 UI 全体の完成形を先に見る価値はあるが、本節の P1/P2 項目は主線（P0）を止めない。論点 1 は決定済みだが、論点 2・3 が未決のままでも P0 の画面・データ設計には影響しない。
@@ -188,6 +190,8 @@ flowchart LR
 - backend は AI の発話が一区切りついたタイミング（直前の `response.done` 受信後）でキューを処理し、友人コメントの割り込みを最小限にする。緊急性の高い語を含む場合の優先注入ルールは P1 で検討する。
 
 ## 6. データモデル案
+
+**コレクション配置の原則（2026-09-26 確定、以後の追加はこれに従う）**: 「1 人の所有者だけが読み書きする私的データ」は `users/{uid}/...` 配下にネストする（`contacts`、`locations` など）。「作成者 1 人 + 閲覧者 N 人（友人・参加者）が絡む共有リソース」はルート直下のコレクションに `owner_uid`（または `uid`）と `participant_uids` を持たせる（`emergency_events`、`emergencySessions`、`friend_links`）。後者をユーザー配下にネストすると「共有されている他人のイベント一覧」が collectionGroup クエリと外部 webhook 経由の owner 解決を必要とし、共有という主目的に対してかえって複雑になるため避ける（8a 章参照）。迷ったら「この document を他人が閲覧する必要があるか」で判定する。
 
 ### `users/{uid}`
 
