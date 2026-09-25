@@ -12,15 +12,15 @@
 | P0-02 | DONE | GCP/Firebase project と billing を利用可能にする | P0-01、人間の課金設定 | Agent が対象 project を CLI で参照可能 |
 | P0-03 | DONE | Firestore、Cloud Run、Secret Manager、service account、必要 API を構成する | P0-02 | 最小権限の実行環境と空の backend がデプロイ済み |
 | P0-04 | DONE | Firebase Android app、Authentication、`google-services.json` を構成する | P0-02 | 2026-09-26: Samsung物理端末（Android 16/API 36）でCredential Manager→Firebase Googleログイン成功、UID発行、再起動後のログイン状態復元を確認 |
-| P0-05 | IN PROGRESS | Android の位置取得・保存 UI と backend API を実装する | P0-03、P0-04 | Androidと認証済み保存APIは実装済み。残りは実端末の座標・精度・時刻・住所を再取得する確認 |
-| P0-06 | IN PROGRESS | 緊急連絡先登録と `contact_id` 解決を実装する | P0-03、P0-04 | Android登録UIと所有者配下へのbackend保存は実装済み。残りは実端末確認 |
+| P0-05 | DONE | Android の位置取得・保存 UI と backend API を実装する | P0-03、P0-04 | 2026-09-26: Samsung物理端末で位置取得に成功し、都道府県と取得時刻だけを認証済みAPIがHTTP 201で保存することを確認。座標・精度・詳細住所は永続化しない |
+| P0-06 | DONE | 緊急連絡先登録と `contact_id` 解決を実装する | P0-03、P0-04 | 2026-09-26: 同意済み番号を物理端末から登録し、マスク表示と認証済みAPI HTTP 201を確認 |
 | P0-07 | DONE | Twilio account、発信番号、テスト受電番号を準備する | 人間の契約・同意 | 2026-09-25: Secret Manager 経由で Twilio Account API を確認。`status: active`、`type: Full`（trial 制限なし）、残高 1814.52 JPY、`key-twilio-from-number` が voice 対応の in-use 番号であることを確認済み。Cloud Run `lifelink-backend` に 4 secret（sid/authToken/from-number/openai）が正しく bind 済み。実際のテスト発信自体は発信先の事前同意取得後に P0-15 で実施する |
 | P0-08 | DONE | OpenAI API key を Secret Manager から Cloud Run へ割り当てる | P0-03 | Cloud Run のみが Secret を参照可能 |
 | P0-08A | DONE | World ID app、RP、action、proof検証と発信認可を実装する | RP登録・署名鍵のSecret Manager保存・Cloud Run割当は完了 | 2026-09-26: Samsung物理端末のWorld AppでProof of Humanを完了し、Congratulations表示、backend status HTTP 200、Firebase `human_verified` claim、LIFELiNKの「World ID人間証明済み」を確認。証明済みユーザーの再証明フローも成功。途中の一時DNS失敗はflow IDを保持してpollを継続し「自動で再試行しています」と表示する |
 | P0-09 | IN PROGRESS | `EmergencyTrigger` と Android Safety gate を実装する | P0-04 | 永続event IDと二段階確認の画面ボタンは実装済み。残りはBLE共通interface化と実端末確認 |
-| P0-10 | IN PROGRESS | backend の冪等イベント作成と Twilio 発信を実装する | P0-06、P0-07、P0-08A、P0-09 | 連打・HTTP 再送でも実着信が一回だけ |
-| P0-11 | IN PROGRESS | Twilio Media Streams と OpenAI Realtime bridge を実装する | P0-08、P0-10 | 実通話で双方向会話が成立 |
-| P0-12 | IN PROGRESS | 鮮度付き初回発話を実装する | P0-05、P0-11 | backendの構造化発話は実装済み。残りは実通話で住所、座標、精度、鮮度の順序を確認 |
+| P0-10 | IN PROGRESS | backend の冪等イベント作成と Twilio 発信を実装する | P0-06、P0-07、P0-08A、P0-09 | 物理端末→Twilio実番号への発信は成功。残りは連打・HTTP再送で実着信が一回だけになる確認 |
+| P0-11 | DONE | Twilio Media Streams と OpenAI Realtime bridge を実装する | P0-08、P0-10 | 2026-09-26: 159秒の実通話でStream started/stopped、受話7,931フレーム、相手発話26ターン、AI出力1,163フレームを確認。相手発話時にTwilio出力bufferをclearする割り込み処理を実装 |
+| P0-12 | DONE | 鮮度付き初回発話を実装する | P0-05、P0-11 | 物理端末で取得した都道府県と情報の鮮度を実通話の初回AI音声で再生確認。座標・精度・詳細住所は発話しない |
 | P0-13 | IN PROGRESS | Android の通話中メモ・位置更新を AI へ注入する | P0-11、P0-12 | 認証・所有権・Call SID・状態検証、冪等保存、Realtime注入、Android送信は実装済み。残りは実通話確認 |
 | P0-14 | IN PROGRESS | BLE Beacon 経路（専用 UUID/Major/Minor 広告、`BeaconReceiver`/Filter/PendingIntent、重複排除）を Safety gate へ接続する | P0-09 | 確定UUID/Major/Minorの完全一致filter、PendingIntent receiver、30秒広告バースト重複排除、共通Safety gate/API接続は実装・debug build済み。残りは実機の長押し一回がAndroidで一回の有効イベントになる確認 |
 | P0-15 | TODO | MVP の失敗系と縦断フローを実端末で確認する | P0-10〜P0-14 | 権限拒否・通信断・外部 API 障害で二重発信せず、実通話証跡あり |
@@ -43,7 +43,7 @@
 
 ## P1: 実通話成立後
 
-**2026-09-26 方針**: P1・P2 は設計・データ構造・Firestore rules の先回りは完了したが、**ハッカソン提出物としては実装しない**。P0（実通話 + Safety gate + World ID + Beacon）を実機で安定させることを最優先する。以下の P1/P2 タスクは参照用の設計記録として残し、着手しない。
+**2026-09-26 方針（訂正、議論・確定待ち）**: 前回「ハッカソン提出物としては実装しない」と書いたのは誤り。正しくは P0-15 が通り次第フル実装へ進む。ただし手戻りを避けるため、実装順序を **P2（本物のデータストア）→ P1（そのストアの上にフル UI を実装）→ 主線再確認 → 追加機能** の順にする提案が出ている（`doc/plan.md` 3 章「主線完了後の実装順序」参照）。この提案がチームで確定するまで、以下の P1/P2 タスクは着手を保留する（設計・rules の先回りは済んでいるので、確定後すぐ着手できる状態にはある）。
 
 | ID | 状態 | タスク | 依存 | 完了条件 |
 | --- | --- | --- | --- | --- |
@@ -69,7 +69,7 @@
 
 ## P2: GPT Live 状況ストアと Responses delegation
 
-`doc/plan.md` 8a 章の設計に対応する実装タスク。**2026-09-26 方針でハッカソン提出範囲外（上記参照）**。P0/P1 の実通話・友人共有が安定し、余裕がある場合のみ検討する。
+`doc/plan.md` 8a 章の設計に対応する実装タスク。**提案どおりなら P1 のフル UI より先に着手する**（`doc/plan.md` 3 章「主線完了後の実装順序」参照、議論・確定待ち）。P0-15 が通り次第、まず `situationStore.ts`/`timelineStore.ts` の最小限の本物のストアを作ることを優先する。
 
 | ID | 状態 | タスク | 依存 | 完了条件 |
 | --- | --- | --- | --- | --- |

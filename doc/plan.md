@@ -56,13 +56,24 @@
 
 上記は実装に着手する順序を後回しにするだけであり、データ構造・API 境界・画面遷移は主線と並行して本文書内（6 章「友人共有とライブフィードのデータモデル」、4 章「Discord 風 UI 画面遷移」、5 章の OpenAI Realtime 拡張）で先に確定する。主線実装者は、これらの設計に反しない範囲でフィールド名・コレクション構造を選ぶこと。
 
-### ハッカソン提出範囲について（2026-09-26）
+### 主線完了後の実装順序（提案、2026-09-26、議論・確定待ち）
 
-P1（友人共有・フル UI モックの実装）と P2（8a 章の GPT Live 状況ストア/Responses delegation）は、設計・データ構造・Firestore rules の先回りはここまでで完了しているが、**ハッカソン提出物としての実装対象には含めない**。理由:
+前回この節に「P1/P2 はハッカソン提出物として実装しない」と書いたが、これは誤り。正しくは **P0-15（実機縦断確認）が通り次第、フル実装へ舵を切る**。ただし P1 の UI を今の P0 の単純なモデル（`emergency_events`/`updates`）の上に作ってしまうと、8a 章で設計済みの P2 の本物のデータストア（`emergencySessions`/`facts`/`timeline`/`delegations`）へ後で移行するときに UI を作り直す二度手間になる。したがって提案する順序は次のとおり。
 
-- P2 は `emergency_events`/`updates` という P0 で既に動いている単純なモデルを `emergencySessions`/`facts`/`timeline`/`delegations` へ置き換える設計であり、`backend/src/voice.ts` の Media Stream bridge を作り直す規模の変更になる。ハッカソン残り時間で着手すると、動いている縦断デモを壊すリスクの方が新機能の得点より大きい。
-- フル UI（4a 章）のうち Discord 連携・録音共有・友人共有 UI はいずれも新しい外部依存（Discord bot、Twilio 録音、Compose の新規大規模画面）を伴い、実装量に対して残り時間が見合わない。
-- したがって P0（実通話 + Safety gate + World ID + Beacon）が実機で安定して動くことを最優先し、P1/P2 は「設計は残したが今回は実装しない」学習・応募資料上の説明にとどめる。時間が本当に余った場合のみ、影響範囲が小さいもの（例: P1-06a のプロフィール項目追加程度）から着手を検討する。
+1. **P0-15 で主線（実通話・Safety gate・World ID・Beacon）が実機で動くことを確認する。** ここまでは今までどおり最優先。
+2. **P2 の本物のデータストアを先に実装する**（`situationStore.ts`/`timelineStore.ts` を中心に、`facts` の append・`state/current` の materialization・`timeline` 書き込みができる状態にする。`delegationStore.ts`/`responsesDelegate.ts` の Responses delegation は後回しでよい）。既存 `backend/src/voice.ts` の Media Stream bridge は、この本物のストアを読み書きする形へ発展させる（8a 章「実装単位」参照）。
+3. **P1 のフル UI を、P2 のデータストアの上に直接実装する。** `emergency_events`/`updates` ベースの中間 UI は作らない。友人共有画面・通話履歴（4a 章の画面インベントリ）は最初から `facts`/`timeline` を読む。
+4. **主線部分（発信〜通話〜位置更新〜終話）の稼働確認を再度行ってから**、友人共有・Discord 連携・GATT などの追加機能に着手する。
+5. 4 が通った後で、初めて 4a 章の未決論点（録音共有、Option A/B、Discord 個別連絡）や GATT（P1-08〜P1-15）などの追加機能に順番を決めて着手する。
+
+**まだ決めていないこと（チームで議論したい点）**:
+
+- P2 のどこまでを「最小限の本物」とするか。`facts`/`state/current`/`timeline` だけで P1 UI は動くか、`delegations`（Responses delegation）も P1 UI に必要か。
+- P0 の `emergency_events`/`updates` に既に入っている実データ（実機テストで作られたイベント）をどう扱うか。移行スクリプトを書くか、P2 移行後は新規イベントだけ新スキーマにするか。
+- P1 のフル UI 実装は Android 側の別チームと並行できるか、それとも P2 の backend 実装を待つ必要があるか。
+- Discord 連携（Option A/B、または 4a 章の個別オプトイン方式）は P1 の初回スコープに含めるか、その次の段階にするか。
+
+この節の結論が出るまで、P2/P1 の実装着手は保留する。結論が出次第、`doc/tasks.md` の P1/P2 セクションを実装順に並べ直す。
 
 ## 4. ユーザーフロー
 
@@ -832,7 +843,7 @@ Android fact が Firestore へ一度だけ保存され `state/current` へ反映
 - Firebase Android app ID: `1:1023311564471:android:b4e6ad83334551f40e0732`
 - Cloud Run service: `lifelink-backend`、region: `asia-northeast1`
 - Cloud Run URL: `https://lifelink-backend-1023311564471.asia-northeast1.run.app`
-- Cloud Run revision: `lifelink-backend-00020-cn8`
+- Cloud Run revision: `lifelink-backend-00022-s5d`
 - Firestore database ID: `(default)`、region: `asia-northeast1`
 - Cloud Run service account: `lifelink-backend@ethglobaltokyo2026lifelink.iam.gserviceaccount.com`
 - Secret 名と version（値は記録しない）
