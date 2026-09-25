@@ -36,7 +36,7 @@
 | P0.5-03 | DONE | GPT Live 状況ストア（Firestore 正本 / Realtime 作業メモリ / Responses delegation の三層構成）のデータ構造と役割分担を確定する | P0.5-01 | 決定を `doc/plan.md` 8a 章に反映済み。`emergencySessions`/`facts`/`state/current`/`timeline`/`delegations` のスキーマと、P0 の `emergency_events`/`updates` との対応関係（8a 章「P0 の emergency_events/updates との関係」）を明記し、P0 実装への変更は不要 |
 | P0.5-04 | DONE | `emergencySessions` 系サブコレクションと `world_id_nullifiers` の Firestore security rules を先行デプロイする | P0.5-03、P0.5-02 | 2026-09-26: P2 実装が始まる前に、これらのコレクションが default rules で開いたままにならないよう `firestore.rules` へ owner/participant 読み取り・全書き込み拒否のルールを追加し `firebase deploy --only firestore:rules` で反映済み |
 | P0.5-05 | DONE | フル UI モック（`doc/uimock/`）を最終系から逆算し、画面インベントリと未決の 3 論点を確定する | なし | 決定を `doc/plan.md` 4a 章に反映済み。1-1〜3-8 の全画面を P0/P1/P2 にマッピングし、`nickname`/`area` フィールド追加とローカル 2 段階音声アナウンスという 2 つの新規要件、および「警察自動通報」「通話録音共有」「友人 UI を自作するか実 Discord を使うか」という 3 つの未決論点を明記した。Android UI 実装自体は他チームが P0 で進行中のため、ここでは着手しない |
-| P0.5-06 | DONE | P2 の `emergencySessions` を `users/{uid}` 配下にネストする構造へ変更する（P0 の `emergency_events` はルート直下のまま変更しない） | P0.5-03、P0.5-04 | 2026-09-26: `doc/plan.md` 8a 章と `firestore.rules` を `users/{uid}/emergencySessions/{session_id}/...` へ更新し `firebase deploy --only firestore:rules` で反映・compile成功を確認済み。P0 の `emergency_events` はすでに実装・デプロイ済みのため対象外とし、理由を 8a 章に明記した |
+| P0.5-06 | DONE | P2 の `emergencySessions` のコレクション配置を確定する | P0.5-03、P0.5-04 | 2026-09-26: 一度 `users/{uid}` 配下にネストする案を検討したが、友人共有（`participant_uids`）が主要ユースケースであり collectionGroup クエリと webhook 経由の owner_uid 伝達が必要になる点を重く見て、**ルート直下の `emergencySessions/{session_id}`（P0 の `emergency_events` と同じ配置）に確定**した。`doc/plan.md` 8a 章と `firestore.rules` をルート直下パターンへ戻し `firebase deploy --only firestore:rules` で再デプロイ・compile成功を確認済み |
 
 注記: P0-13（通話中メモ・位置更新）を実装する際は、`updates` ドキュメントのフィールド名を `doc/plan.md` 6a 章の拡張スキーマ（`type`、`author_type`、`author_uid` などを含む）に合わせること。P1 での friend_comment / transcript 追加時にフィールド追加のみで済ませるため。
 
@@ -68,7 +68,7 @@
 
 | ID | 状態 | タスク | 依存 | 完了条件 |
 | --- | --- | --- | --- | --- |
-| P2-01 | TODO | `situationStore.ts`: `facts` の append・`state/current` の materialization・`sequence` 採番・認可を実装する（`users/{uid}/emergencySessions/{session_id}` 配下、2026-09-26 のネスト構造決定に従う） | P0-15、P1-03 | Android fact が一度だけ保存され、`state/current` の `version` が単調増加する |
+| P2-01 | TODO | `situationStore.ts`: `facts` の append・`state/current` の materialization・`sequence` 採番・認可を実装する（ルート直下の `emergencySessions/{session_id}` 配下、2026-09-26 にネスト案からルート直下に差し戻し済み） | P0-15、P1-03 | Android fact が一度だけ保存され、`state/current` の `version` が単調増加する |
 | P2-02 | TODO | `timelineStore.ts`: `timeline` への transcript/UI 履歴書き込みを実装する（8a 章の `delivery` 状態遷移を含む） | P2-01 | 割り込み時に `conversation.item.truncate` と連動して `interrupted` が記録される |
 | P2-03 | TODO | `realtimeTools.ts`: `get_current_situation`/`get_session_history` の同期 tool と routing 規則を実装する | P2-01、P2-02 | 「今どこ」「さっき何と言ったか」に根拠 `fact_id` 付きで即答できる |
 | P2-04 | TODO | `delegationStore.ts` + `responsesDelegate.ts`: `delegate_investigation` の非同期委譲（`background: true`、poll、`call_id` 冪等化）を実装する | P2-03 | 保留発話が一回だけ発話され、Responses 完了後に同じ通話へ結果が音声で返る |
