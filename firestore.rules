@@ -68,42 +68,44 @@ service cloud.firestore {
       }
     }
 
-    // users/{uid}/emergencySessions/{session_id} — P2 target schema, doc/plan.md 8a.
-    // Nested under the owner (2026-09-26 decision) so owner checks use the path
-    // segment directly instead of a stored field. Not yet written by backend;
-    // rules added ahead of implementation so the collection is never
+    // emergencySessions/{session_id} — P2 target schema, doc/plan.md 8a.
+    // Root-level (2026-09-26, reverted from a users/{uid}-nested design):
+    // friend-sharing is the primary access pattern here, and a flat collection
+    // keeps "shared with me" a plain participant_uids query instead of a
+    // collectionGroup query across every user's subtree. Not yet written by
+    // backend; rules added ahead of implementation so the collection is never
     // accidentally left on open/default rules.
-    match /users/{ownerUid}/emergencySessions/{sessionId} {
+    match /emergencySessions/{sessionId} {
       allow read: if isSignedIn() &&
-        (request.auth.uid == ownerUid ||
+        (request.auth.uid == resource.data.owner_uid ||
          request.auth.uid in resource.data.participant_uids);
       allow write: if false;
 
       function canReadSession() {
         return isSignedIn() &&
-          (request.auth.uid == ownerUid ||
-           request.auth.uid in get(/databases/$(database)/documents/users/$(ownerUid)/emergencySessions/$(sessionId)).data.participant_uids);
+          (request.auth.uid == get(/databases/$(database)/documents/emergencySessions/$(sessionId)).data.owner_uid ||
+           request.auth.uid in get(/databases/$(database)/documents/emergencySessions/$(sessionId)).data.participant_uids);
       }
 
-      // users/{uid}/emergencySessions/{session_id}/state/current
+      // emergencySessions/{session_id}/state/current
       match /state/{stateId} {
         allow read: if canReadSession();
         allow write: if false;
       }
 
-      // users/{uid}/emergencySessions/{session_id}/facts/{fact_id}
+      // emergencySessions/{session_id}/facts/{fact_id}
       match /facts/{factId} {
         allow read: if canReadSession();
         allow write: if false;
       }
 
-      // users/{uid}/emergencySessions/{session_id}/timeline/{event_id}
+      // emergencySessions/{session_id}/timeline/{event_id}
       match /timeline/{eventId} {
         allow read: if canReadSession();
         allow write: if false;
       }
 
-      // users/{uid}/emergencySessions/{session_id}/delegations/{delegation_id}
+      // emergencySessions/{session_id}/delegations/{delegation_id}
       match /delegations/{delegationId} {
         allow read: if canReadSession();
         allow write: if false;
