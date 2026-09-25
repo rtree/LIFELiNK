@@ -16,8 +16,9 @@
 | P0-06 | TODO | 緊急連絡先登録と `contact_id` 解決を実装する | P0-03、P0-04 | E.164 番号を登録し、所有者検証付きで解決可能 |
 | P0-07 | IN PROGRESS | Twilio account、発信番号、テスト受電番号を準備する | 人間の契約・同意 | Agent が Secret Manager 経由でテスト発信可能 |
 | P0-08 | DONE | OpenAI API key を Secret Manager から Cloud Run へ割り当てる | P0-03 | Cloud Run のみが Secret を参照可能 |
+| P0-08A | BLOCKED | World ID app、RP、action、proof検証と発信認可を実装する | 人間によるRP署名鍵のSecret Manager直接保存 | Googleログイン済みかつ人間性証明済みユーザーだけが発信可能 |
 | P0-09 | TODO | `EmergencyTrigger` と Android Safety gate を実装する | P0-04 | 画面ボタンが一意な `emergency_event_id` を生成 |
-| P0-10 | IN PROGRESS | backend の冪等イベント作成と Twilio 発信を実装する | P0-06、P0-07、P0-09 | 連打・HTTP 再送でも実着信が一回だけ |
+| P0-10 | IN PROGRESS | backend の冪等イベント作成と Twilio 発信を実装する | P0-06、P0-07、P0-08A、P0-09 | 連打・HTTP 再送でも実着信が一回だけ |
 | P0-11 | IN PROGRESS | Twilio Media Streams と OpenAI Realtime bridge を実装する | P0-08、P0-10 | 実通話で双方向会話が成立 |
 | P0-12 | TODO | 鮮度付き初回発話を実装する | P0-05、P0-11 | 住所、座標、精度、鮮度を順番どおり発話 |
 | P0-13 | TODO | Android の通話中メモ・位置更新を AI へ注入する | P0-11、P0-12 | 終話せず追加情報を音声で伝達可能 |
@@ -36,7 +37,6 @@
 
 | ID | 状態 | タスク | 依存 | 完了条件 |
 | --- | --- | --- | --- | --- |
-| P1-01 | TODO | World ID / IDKit の app、RP、action、proof 検証と発信認可を実装する | P0-15、Secret 保存先 | Googleログイン済みかつ人間性証明済みユーザーだけが発信可能 |
 | P1-02 | TODO | `friend_links` コレクションと招待コード発行・承認 API（`/v1/friends/*`）を実装する | P0-15、P0.5-01 | 相互承認済みの友人一覧が取得でき、`pending`/`accepted`/`blocked` を切り替えられる |
 | P1-03 | TODO | `emergency_events.participant_uids` のスナップショット生成と Firestore security rules を実装する | P1-02 | イベント作成時点の友人だけが該当イベントを読み取れ、後から友人になった uid はアクセスできないことを確認 |
 | P1-04 | TODO | `updates` フィードへ `friend_comment`・`transcript_contact`・`transcript_ai` を書き込む処理を実装する（入力音声 transcription 有効化を含む） | P1-03、P0-11 | 通話中の両者の発話と友人コメントが同一フィードに時系列で保存される |

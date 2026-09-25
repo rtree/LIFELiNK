@@ -37,6 +37,7 @@
 - 既存 BLE イベントを受け取れる場合の同一 Safety gate への接続
 - 端末と backend の二段階の重複発信防止
 - Firebase Authentication、Firestore、Cloud Run、Secret Manager
+- World ID / IDKit による人間性証明と発信 API の認可
 - Twilio Programmable Voice、双方向 Media Streams
 - OpenAI Realtime API による初回発話、会話、通話中の追加情報注入
 - 発信状態と失敗理由を Android へ表示する最低限の UI
@@ -46,7 +47,6 @@
 
 以下はコード上の拡張点と設計判断を残すが、上記の実通話が成立するまで実装のために主線を止めない。
 
-- World ID / IDKit による人間性証明
 - 友人共有
 - Discord 風の通話・会話履歴
 - Android マイクからの周辺音声中継
@@ -526,6 +526,7 @@ BLE 層から電話 API や Firebase を直接呼ばない。Android Controller 
 - Secret 名と version（値は記録しない）
 - Twilio Phone Number SID、Call SID（電話番号や token は記録しない）
 - World ID `app_id`、`rp_id`、action、environment（signing key は記録しない）
+- World ID app ID: `app_30fbdcf47be73f8a3603f0633b8aeb7c`（LIFELiNK、production external）
 
 ## 11. 実装フェーズ
 
@@ -568,8 +569,9 @@ BLE 層から電話 API や Firebase を直接呼ばない。Android Controller 
 
 ### Phase 6: 延期機能
 
-- World ID / IDKit、友人共有、Discord 風履歴、周辺音声を優先順位順に実装する。ただし発信 API には最初から `human_verified` の認可境界を用意し、World ID 統合後は証明済みユーザーだけが発信できるようにする。
-- World ID は `world-id-idkit` Skill と Developer Portal MCP を使い、Secret Manager の保存先を準備してから RP signing key を生成する。
+- 友人共有、Discord 風履歴、周辺音声を優先順位順に実装する。
+
+World ID / IDKit は延期機能ではなく、実通話前の発信認可として実装する。`world-id-idkit` Skill と Developer Portal MCP を使い、RP signing key は会話やログを経由させず Secret Manager へ直接保存する。
 
 ### Phase 7: GATT 移行（Beacon 完動後）
 
