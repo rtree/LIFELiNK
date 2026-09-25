@@ -73,11 +73,16 @@ ssh araki@10.211.55.2 'mkdir -p ~/operations && cd ~/operations && git clone htt
 
 ### 3. Android Emulator の動作確認
 
+Coding Agentが検証するときは、ユーザーが画面を確認できるようGUI表示を既定とし、`-no-window`を付けない。
+
 ```bash
-ssh araki@10.211.55.2 'nohup "$HOME/Library/Android/sdk/emulator/emulator" -avd beacon_api36 -no-window -no-audio -no-boot-anim > /tmp/emulator.log 2>&1 & sleep 20 && "$HOME/Library/Android/sdk/platform-tools/adb" devices'
+ssh beacon-host 'ANDROID_HOME="$HOME/Library/Android/sdk"; nohup "$ANDROID_HOME/emulator/emulator" -avd beacon_api36 -no-audio -no-snapshot-save > /tmp/lifelink-emulator.log 2>&1 < /dev/null &'
+ssh beacon-host 'ADB="$HOME/Library/Android/sdk/platform-tools/adb"; "$ADB" wait-for-device; until [[ "$("$ADB" shell getprop sys.boot_completed | tr -d "\r")" == "1" ]]; do :; done; "$ADB" devices -l'
 ```
 
-`List of devices attached` に `emulator-5554 device` が出れば起動成功。以後の Android 実装が進んだら `adb install` / `adb logcat` も同じ SSH 経由で行える。GUI で見たい場合は host に直接ログイン（画面共有 or 物理アクセス）して `-no-window` を外す。
+`List of devices attached` に `emulator-5554 device` が出れば起動成功。以後の Android 実装が進んだら `adb install` / `adb logcat` も同じ SSH 経由で行える。ウィンドウはhostのログイン済みデスクトップへ表示される。
+
+CIや画面不要の自動確認だけは、上記の起動コマンドへ`-no-window`を追加してheadless実行してよい。
 
 ### 4. XIAO nRF52840 書き込みツールチェーン（arduino-cli）
 
@@ -139,10 +144,10 @@ adb shell am start -n com.rtree.LIFELiNK/.MainActivity
 
 ## 2026-09-26 追加検証: ゲストbuildをhost emulatorで実行
 
-ゲスト内emulatorはnested HVFが使えず起動しない。ゲストでbuildしたAPKをSSH転送し、Apple SiliconホストのAVDへ直接入れる。
+ゲスト内emulatorはnested HVFが使えず起動しない。ゲストでbuildしたAPKをSSH転送し、Apple SiliconホストのAVDへ直接入れる。通常はユーザーが画面を見られるGUIモードで起動する。
 
 ```bash
-ssh beacon-host 'ANDROID_HOME="$HOME/Library/Android/sdk"; nohup "$ANDROID_HOME/emulator/emulator" -avd beacon_api36 -no-window -no-audio -no-snapshot-save > /tmp/lifelink-emulator.log 2>&1 < /dev/null &'
+ssh beacon-host 'ANDROID_HOME="$HOME/Library/Android/sdk"; nohup "$ANDROID_HOME/emulator/emulator" -avd beacon_api36 -no-audio -no-snapshot-save > /tmp/lifelink-emulator.log 2>&1 < /dev/null &'
 ssh beacon-host 'ADB="$HOME/Library/Android/sdk/platform-tools/adb"; "$ADB" wait-for-device; until [[ "$("$ADB" shell getprop sys.boot_completed | tr -d "\r")" == "1" ]]; do :; done; "$ADB" devices -l'
 
 scp android/app/build/outputs/apk/debug/app-debug.apk beacon-host:/tmp/lifelink-debug.apk
