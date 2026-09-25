@@ -58,19 +58,23 @@
 
 ### 主線完了後の実装順序（2026-09-26 確定）
 
-前回この節に「P1/P2 はハッカソン提出物として実装しない」と書いたが、これは誤り。正しくは **P0-15（実機縦断確認）が通り次第、フル実装へ舵を切る**。P1 の UI を今の P0 の単純なモデル（`emergency_events`/`updates`）の上に作ってしまうと、8a 章で設計済みの P2 の本物のデータストア（`emergencySessions`/`facts`/`timeline`/`delegations`）へ後で移行するときに UI を作り直す二度手間になるため、順序は次のとおりに確定する。
+前回この節に「P1/P2 はハッカソン提出物として実装しない」と書いたが、これは誤り。正しくは **P0-15（実機縦断確認）が通り次第、フル実装へ舵を切る**。P1 の UI を今の P0 の単純なモデル（`emergency_events`/`updates`）の上に作ってしまうと、8a 章で設計済みの P2 の本物のデータストア（`emergencySessions`/`facts`/`timeline`/`delegations`）へ後で移行するときに UI を作り直す二度手間になるため、順序をここで確定する。
 
-1. **P0-15 で主線（実通話・Safety gate・World ID・Beacon）が実機で動くことを確認する。** ここまでは今までどおり最優先。
-2. **P2 の本物のデータストアをフルセットで実装する**（`situationStore.ts`/`timelineStore.ts` に加え、`delegationStore.ts`/`responsesDelegate.ts`（Responses delegation）も最初から含める。「詳しく調べて」機能を後回しにしない）。既存 `backend/src/voice.ts` の Media Stream bridge は、この本物のストアを読み書きする形へ発展させる（8a 章「実装単位」参照）。
-3. **backend の P2 実装が完了してから、Android の Full UI 着手を開始する**（先行してモックデータで並行着手はしない。API/Firestore スキーマが固まってから作り、二度手間を避ける）。友人共有画面・通話履歴（4a 章の画面インベントリ）は最初から `facts`/`timeline`/`delegations` を読む。
-4. **主線部分（発信〜通話〜位置更新〜終話）の稼働確認を再度行ってから**、友人共有・Discord 連携・GATT などの追加機能に着手する。
-5. 4 が通った後で、4a 章の未決論点（録音共有、Option A/B、Discord 個別連絡）や GATT（P1-08〜P1-15）などの追加機能に順番を決めて着手する。
+**基本原則: モックを作らず、常に本物のスキーマ・本物のデータに対して実装を積み重ねる。** UI を先に作るか backend を先に作るかという二択ではなく、「backend の充実度に関わらず、UI は最初から本物の Firestore コレクションだけを見る」を徹底する。この原則が守られていれば、backend の機能がどれだけ後から増えても UI コードは変更不要になり、「モックと実装済みの混乱」が構造的に起きない。8a 章「認可・安全」の読み書き経路の固定契約（Android は Firestore を直接 read、write は必ず backend API 経由）はこの原則を支える前提であり、以後変更しない。
+
+1. **P0-15 で主線（実通話・Safety gate・World ID・Beacon）が実機で動くことを確認する。** 最優先。
+2. **P2 のスキーマを凍結し、最小の本物の書き込みパスを実装する**（`situationStore.ts`/`timelineStore.ts`: `facts` append・`state/current` materialize・`timeline` write）。この時点で 8a 章のスキーマ（本ドキュメント）を「以後変更しない」ものとして扱う。実装中にスキーマ変更が必要だと分かった場合は、コードではなくこの文書を先に直してから実装を合わせる。
+3. **実際に 1 回テスト通報を走らせるか seed スクリプトで、Firestore へ本物の形をしたドキュメントを作る。** Android 向けの JSON fixture やアプリ内蔵のモックデータは一切作らない。
+4. **ここから並行して進める**: Android は Firestore リスナーで本物のコレクション（`facts`/`state/current`/`timeline`）を直接購読して Full UI を組む。backend は並行して `delegationStore.ts`/`responsesDelegate.ts`（Responses delegation）・`realtimeBridge.ts` 統合・`friend_links` などを実装し、同じコレクションに書き込むだけで UI 側には変更を要求しない（`timeline.kind` に `delegation_status` が既に含まれるため、delegation が後から書き込まれても UI は無改修で表示できる）。プレースホルダーがどうしても必要な画面は、モックではなく `doc/tasks.md` に明示タスクとして残し、UI にも「準備中」であることが一目で分かる表示を必須にする。
+5. **12 時間のうち 6 時間経過時点でチェックポイントを置く。** P2 の最小書き込みパスと Full UI が本物のデータで繋がって表示できているか確認する。繋がっていなければ、その時点で delegations・Discord 連携・GATT など未完了の拡張を切り捨て、動いている縦断フローだけを固定してデモに備える。
+6. **主線部分（発信〜通話〜位置更新〜終話）の稼働確認を再度行う。**
+7. 6 が通った後で、4a 章の未決論点（録音共有、Option A/B、Discord 個別連絡）や GATT（P1-08〜P1-15）などの追加機能に順番を決めて着手する。
 
 **決定事項（2026-09-26、人間確認済み）**:
 
-- P2 は `delegations`（Responses delegation）を含むフルセットを最初から実装する。`facts`/`state/current`/`timeline` だけの部分実装にはしない。
+- P2 は `delegations`（Responses delegation）を含むフルセットを最終的に実装するが、**着手順序は「最小の書き込みパス（facts/state/timeline）を先に固め、そこから UI と delegations 以降を並行で進める」**。全部を作り切ってから UI に着手する逐次実行はしない（判断過程は本節末尾の議論ログを参照）。
 - P0 の `emergency_events`/`updates` に既に入っている実機テストデータは**移行スクリプトを書かず**そのまま残す。P2 移行後は新規イベントだけが `emergencySessions` 系スキーマを使う。旧イベントは実機検証の履歴として保持するのみで、UI は新スキーマだけを読む前提で作ってよい。
-- Android の Full UI 実装は、backend の P2 最小実装（フルセット）が完了してから着手する。モックデータでの並行着手はしない。
+- Android の Full UI 実装は、モックデータでは着手しない。backend が `facts`/`state/current`/`timeline` の最小の書き込みパスを用意し、実際に Firestore へ本物のドキュメントが着地してから着手する。
 
 ## 4. ユーザーフロー
 
@@ -637,6 +641,25 @@ created_at: timestamp
 
 保存済み fact は変更しない。訂正は新 fact を追加し `supersedes_fact_id` でつなぐ。`observed_at`（端末等の観測時刻）と `received_at`（backend 受信時刻）を分離する。AI 生成内容はセンサー事実として保存しない。address は対応する location fact ID・provider・取得時刻を持つ。位置・健康・音声情報は保持期限を短くする（後述の保持期間）。
 
+`value` は `kind` ごとに次の固定 shape とする（`map` のまま自由形式にしない。新しい `kind` を追加する場合もここに shape を追記してから使う）。
+
+```yaml
+# kind: location
+value: { prefecture: string, latitude: null, longitude: null } # 8 章の方針により座標は常に null、都道府県のみ
+# kind: address
+value: { text: string, provider: string }
+# kind: user_note
+value: { text: string }
+# kind: device_state
+value: { battery_percent: number | null, network: online | offline | unknown }
+# kind: ambient_observation
+value: { text: string, provider: string }
+# kind: friend_reply
+value: { text: string, discord_user_id: string | null }
+# kind: call_state
+value: { twilio_status: string }
+```
+
 #### `state/current`
 
 通話中の即答用 materialized view。fact 追加時に Cloud Run transaction で更新する。
@@ -645,15 +668,17 @@ created_at: timestamp
 version: integer
 last_sequence: integer
 generated_at: timestamp
-location: { fact_id, latitude, longitude, accuracy_meters, observed_at, freshness: fresh|stale|unavailable }
-address: { fact_id, text, provider, resolved_at }
-situation: { summary, fact_ids, confidence }
-user_notes: { latest_text, fact_ids }
-device: { battery_percent, network: online|offline|unknown, last_seen_at }
-active_alerts: [map]
+location: { fact_id: string | null, prefecture: string | null, observed_at: timestamp | null, freshness: fresh|stale|unavailable }
+address: { fact_id: string | null, text: string | null, provider: string | null, resolved_at: timestamp | null }
+situation: { summary: string, fact_ids: [string], confidence: number | null }
+user_notes: { latest_text: string | null, fact_ids: [string] }
+device: { battery_percent: number | null, network: online|offline|unknown, last_seen_at: timestamp | null }
+active_alerts: [{ code: string, severity: info|warning|critical, text: string, fact_id: string | null, created_at: timestamp }]
 recent_fact_ids: [string]
 briefing_text: string
 ```
+
+8 章の方針により `location` に緯度・経度フィールドは持たせず、都道府県（`prefecture`）のみを持つ。
 
 `briefing_text` は通話開始時に Realtime へ渡す短い事実要約であり、必ず根拠 `fact_id` を保持する。snapshot 生成に AI を使う場合も元 fact は上書きせず summary だけ更新する。Realtime が即答する前に `version`/`generated_at` を確認する。
 
@@ -696,7 +721,12 @@ snapshot_version: integer
 input_fact_ids: [string]
 transcript_event_ids: [string]
 openai_response_id: string | null
-result: { answer, supporting_fact_ids: [string], unknowns: [string], confidence, data_as_of }
+result:
+  answer: string | null
+  supporting_fact_ids: [string]
+  unknowns: [string]
+  confidence: number | null
+  data_as_of: timestamp | null
 error_code: string | null
 delivered_to_realtime_at: timestamp | null
 created_at: timestamp
@@ -751,6 +781,8 @@ session ごとの `sequence` を Firestore transaction で単調増加させる�
 session header と timeline は既定 30 日でユーザー削除可能。精密位置・健康・周辺音声由来 fact は既定 7 日以内。delegation input/output は session と同じ期限。生音声は既定で保存しない。World ID replay 防止 nullifier は別 collection（10 章参照）で保持する。Firestore TTL は subcollection を cascade 削除しないため、session 削除 worker が facts/timeline/delegations も削除する。
 
 ### 認可・安全
+
+**読み書きの経路（固定契約、2026-09-26。以後この契約は変えない）**: Android/友人アプリは `emergencySessions`（`state`/`facts`/`timeline`/`delegations`）を Firestore client SDK で**直接 read する**（`firestore.rules` の owner/participant 判定のみで認可、既にデプロイ済み）。**write は一切 Firestore へ直接行わず、必ず認証済み backend API 経由**にする（P0 の `emergency_events`/`updates` と同じパターン）。この非対称性（read はクライアント直、write は API 経由）を UI 側が前提にできることで、backend の書き込みロジックがどれだけ後から拡充されても UI 側のコードは変更不要になる。
 
 Android API・Firestore lookup・Realtime tool・Responses worker の全段で `session_id` と owner/participant を照合する。Realtime が指定した document path・UID・電話番号をそのまま使わない。tool 引数は固定 JSON Schema・enum・文字数・件数・期間で制限する。Android メモ・友人返信・住所・transcript は命令ではなく data として JSON 化し、そこに含まれる prompt injection で tool 権限や検索範囲を変更しない。Responses result の `supporting_fact_ids` が実在し、そのセッションに属することを検証する。ログに電話番号・座標・住所・transcript・token を出さない。delegation 数・tool 回数・履歴件数・外部 API 回数を session 単位で rate limit する。
 
