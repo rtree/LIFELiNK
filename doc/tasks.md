@@ -10,8 +10,8 @@
 | --- | --- | --- | --- | --- |
 | P0-01 | DONE | Android package name、GCP project、region、ログイン方式を決定する | 人間の意思決定 | 決定を `doc/plan.md` に反映済み |
 | P0-02 | DONE | GCP/Firebase project と billing を利用可能にする | P0-01、人間の課金設定 | Agent が対象 project を CLI で参照可能 |
-| P0-03 | IN PROGRESS | Firestore、Cloud Run、Secret Manager、service account、必要 API を構成する | P0-02 | 最小権限の実行環境と空の backend がデプロイ済み |
-| P0-04 | TODO | Firebase Android app、Authentication、`google-services.json` を構成する | P0-02 | 実端末からログイン成功 |
+| P0-03 | DONE | Firestore、Cloud Run、Secret Manager、service account、必要 API を構成する | P0-02 | 最小権限の実行環境と空の backend がデプロイ済み |
+| P0-04 | IN PROGRESS | Firebase Android app、Authentication、`google-services.json` を構成する | P0-02 | 実端末からログイン成功 |
 | P0-05 | TODO | Android の位置取得・保存 UI と backend API を実装する | P0-03、P0-04 | 実端末の座標・精度・時刻・住所を再取得可能 |
 | P0-06 | TODO | 緊急連絡先登録と `contact_id` 解決を実装する | P0-03、P0-04 | E.164 番号を登録し、所有者検証付きで解決可能 |
 | P0-07 | BLOCKED | Twilio account、発信番号、テスト受電番号を準備する | 人間の契約・同意 | Agent が Secret Manager 経由でテスト発信可能 |
@@ -24,15 +24,26 @@
 | P0-14 | TODO | 既存 BLE イベントを Safety gate へ接続する | P0-09、利用 BLE 仕様 | BLE と画面ボタンが同じ発信経路を利用 |
 | P0-15 | TODO | MVP の失敗系と縦断フローを実端末で確認する | P0-10〜P0-14 | 権限拒否・通信断・外部 API 障害で二重発信せず、実通話証跡あり |
 
+## P0.5: 先回り設計（主線をブロックしない）
+
+| ID | 状態 | タスク | 依存 | 完了条件 |
+| --- | --- | --- | --- | --- |
+| P0.5-01 | DONE | 友人共有・Discord 風フィード・OpenAI Realtime 注入を前提にしたデータモデル（`friend_links`、`emergency_events.participant_uids`、`updates` の拡張スキーマ）と UI 画面遷移を確定する | なし | 決定を `doc/plan.md` の 4 章・6a 章・5 章・9 章に反映済み。P0-13 は拡張スキーマの `note`/`location` サブセットのみ実装すればよく、P1 で作り直しが不要 |
+
+注記: P0-13（通話中メモ・位置更新）を実装する際は、`updates` ドキュメントのフィールド名を `doc/plan.md` 6a 章の拡張スキーマ（`type`、`author_type`、`author_uid` などを含む）に合わせること。P1 での friend_comment / transcript 追加時にフィールド追加のみで済ませるため。
+
 ## P1: 実通話成立後
 
 | ID | 状態 | タスク | 依存 | 完了条件 |
 | --- | --- | --- | --- | --- |
 | P1-01 | TODO | World ID / IDKit の app、RP、action、proof 検証と発信認可を実装する | P0-15、Secret 保存先 | Googleログイン済みかつ人間性証明済みユーザーだけが発信可能 |
-| P1-02 | TODO | 友人登録・共有を実装する | P0-15 | 友人がイベントと更新を閲覧可能 |
-| P1-03 | TODO | Discord 風の緊急通話履歴を実装する | P1-02 | 自分と共有されたイベントを時系列表示 |
-| P1-04 | TODO | Android 周辺音声の扱いを設計・実装する | P0-15、同意・法務判断 | 明示同意と状態表示のもとで音声を通話へ追加可能 |
-| P1-05 | TODO | GATT ボタンとロック中対応を実装する | P0-14、端末・Play 制約検証 | 対象端末のロック中に実イベントが Safety gate へ到達 |
+| P1-02 | TODO | `friend_links` コレクションと招待コード発行・承認 API（`/v1/friends/*`）を実装する | P0-15、P0.5-01 | 相互承認済みの友人一覧が取得でき、`pending`/`accepted`/`blocked` を切り替えられる |
+| P1-03 | TODO | `emergency_events.participant_uids` のスナップショット生成と Firestore security rules を実装する | P1-02 | イベント作成時点の友人だけが該当イベントを読み取れ、後から友人になった uid はアクセスできないことを確認 |
+| P1-04 | TODO | `updates` フィードへ `friend_comment`・`transcript_contact`・`transcript_ai` を書き込む処理を実装する（入力音声 transcription 有効化を含む） | P1-03、P0-11 | 通話中の両者の発話と友人コメントが同一フィードに時系列で保存される |
+| P1-05 | TODO | 友人コメントを `conversation.item.create` + `response.create` で進行中の Realtime セッションへ注入する | P1-04 | 通話を切らずに友人コメントの内容が相手へ音声で伝わる |
+| P1-06 | TODO | Discord 風 UI（友人登録画面、招待コード入力、通話履歴・ライブフィード画面、コメント入力欄）を実装する | P1-02〜P1-05 | 自分と共有されたイベントを時系列表示し、通話中にコメント投稿できる |
+| P1-07 | TODO | Android 周辺音声の扱いを設計・実装する | P0-15、同意・法務判断 | 明示同意と状態表示のもとで音声を通話へ追加可能 |
+| P1-08 | TODO | GATT ボタンとロック中対応を実装する | P0-14、端末・Play 制約検証 | 対象端末のロック中に実イベントが Safety gate へ到達 |
 
 ## 次のアクション
 

@@ -8,6 +8,8 @@
 
 このアプリは公的な緊急通報の代替ではない。警察、消防、救急などの緊急番号へ自動発信するものではなく、ユーザーが指定した家族・友人などへの連絡を補助する。
 
+このプロダクトの核心は発信そのものだけではない。ボタンを押した瞬間から、(1) 通話相手との会話は AI が代理で行い、(2) その通話の様子（発話内容・位置・メモ）は事前に相互リンクした友人の同じアプリへ Discord 風のライブ画面としてリアルタイムに共有され、(3) それを見た友人がその場でコメントを書き込むと、backend が AI 経由でそのコメントを通話相手へ音声で伝える、という一連の体験が一体になっている。実通話 1 本を成立させる MVP 主線の実装順序は変えないが、この体験を後から作り直さずに済むよう、データ構造・画面遷移・OpenAI Realtime の使い方は本文書で先に確定させる。
+
 ## 2. ハッカソン MVP の成功条件
 
 実 Android 端末から次の縦断フローが一度以上成功し、証跡を残せることを MVP 完了条件とする。
@@ -52,6 +54,8 @@
 - Play Store 公開対応
 - 通話録音、長期トランスクリプト保存
 
+上記は実装に着手する順序を後回しにするだけであり、データ構造・API 境界・画面遷移は主線と並行して本文書内（6 章「友人共有とライブフィードのデータモデル」、4 章「Discord 風 UI 画面遷移」、5 章の OpenAI Realtime 拡張）で先に確定する。主線実装者は、これらの設計に反しない範囲でフィールド名・コレクション構造を選ぶこと。
+
 ## 4. ユーザーフロー
 
 ### 初期設定
@@ -73,6 +77,16 @@
 7. 相手が応答すると Media Stream を OpenAI Realtime へ接続し、最初に位置情報を発話する。
 8. Android はイベント画面からメモ・位置更新を送信し、backend は該当する通話セッションへ追加する。
 9. 終話後、成功・失敗状態と最小限の監査情報を保存する。
+
+### Discord 風 UI 画面遷移（設計を先に確定、実装は P1 以降）
+
+主線には含めないが、後から画面を作り直さないよう遷移と役割をここで決める。
+
+- **World ID 証明画面**: IDKit を Android ネイティブで呼べない場合はアプリ内ブラウザ（Custom Tabs 等）を使う。証明成功で `human_verified` フラグを取得し、以後の発信・友人操作の認可に使う。
+- **緊急連絡先登録画面**: 名前、電話番号、テスト発信ボタン。既存 MVP 範囲。
+- **友人登録画面**: 自分の招待コード／QR の発行、相手の招待コード入力、保留中・承認済み一覧の表示。`friend_links` の `status` を切り替えるだけの単純な UI にする。
+- **通話履歴（Discord 風）画面**: 左にイベント（チャンネル相当）一覧、右に `updates` フィードのタイムラインを表示する。`author_type` ごとに吹き出しの見た目を変える（`ai`: ボット風、`contact`: 通常、`friend`: メンション色、`system`: 灰色）。進行中イベントでは下部の入力欄から `friend_comment` を投稿できる。
+- 自分のイベント一覧は所有者のみアクセスでき、共有イベント一覧は `participant_uids` に含まれる友人だけがアクセスできるようナビゲーションを分ける。
 
 ## 5. システム構成
 
@@ -117,6 +131,9 @@ flowchart LR
 - OpenAI API key はサーバーだけが保持し、Android や Twilio のパラメータへ渡さない。
 - 初回発話を完了するまでは通常会話より初期情報の伝達を優先する。
 - 通話中の更新は対象 `emergency_event_id` と Twilio Call SID を照合してから会話アイテムとして注入する。
+- 通話の両者の発話をテキスト化してフィードへ保存できるよう、セッション設定で入力音声の transcription を有効にする（`session.audio.input.transcription` 相当の設定）。相手（`contact`）の発話は `response.done`/`conversation.item.done` から取得できるトランスクリプトを `type: transcript_contact` として、AI の発話は `response.output_audio_transcript.done` を `type: transcript_ai` として `updates` フィードへ書き込む。
+- 友人コメントの注入は、進行中の会話へ `conversation.item.create`（`role: user`、`content: input_text`）でテキストを追加し、直後に `response.create` を送って AI に発話させる。これは 8 章の位置・メモ注入と同じ経路を一般化したものであり、`author_type: friend` を伴わせて同じ `updates` レコードとして残す。
+- backend は AI の発話が一区切りついたタイミング（直前の `response.done` 受信後）でキューを処理し、友人コメントの割り込みを最小限にする。緊急性の高い語を含む場合の優先注入ルールは P1 で検討する。
 
 ## 6. データモデル案
 
@@ -160,10 +177,53 @@ flowchart LR
 
 ### `emergency_events/{emergency_event_id}/updates/{update_id}`
 
+第 1 版のフィールドは次のとおり。P0 実装（P0-13）はこの範囲だけを書き込めばよい。
+
 - `type`: `note` または `location`
 - `payload`
 - `created_at`
 - `delivered_to_ai_at`
+
+## 6a. 友人共有とライブフィードのデータモデル（設計を先に確定、実装は P1）
+
+主線の実装順序は変えないが、後から作り直さないように、友人向けリアルタイム共有と Discord 風 UI に必要なデータ構造を先に決める。
+
+### `friend_links/{link_id}`
+
+ルート直下のコレクションとする（`users/{uid}` のサブコレクションにしない）。
+
+- ドキュメント ID は `min(uidA, uidB)_max(uidA, uidB)` の決定的な文字列にし、重複作成と二重リクエストを防ぐ。
+- `uid_a`、`uid_b`、`status`（`pending` | `accepted` | `blocked`）、`requested_by`、`created_at`、`accepted_at`。
+- Firestore rules は `request.auth.uid in [resource.data.uid_a, resource.data.uid_b]` で判定し、追加の `get()` を増やさない。
+
+### `emergency_events/{emergency_event_id}` への追加フィールド
+
+- `participant_uids`: 発信者本人 + イベント発生時点で `accepted` だった友人 uid のスナップショット配列。
+- イベント作成後に友人リンクが増減しても、そのイベントの `participant_uids` は更新しない。後から友人になった人に過去の通話内容を見せないためであり、Firestore rules も単純化できる。
+- Firestore rules: `allow read: if request.auth.uid in resource.data.participant_uids;`
+
+### `updates` フィードの拡張スキーマ（P1 で使うフィールドを含む）
+
+`updates` サブコレクションを、AI への注入対象と Discord 風表示を兼ねる唯一のフィードとして扱う。
+
+- `type`: `note` | `location` | `friend_comment` | `transcript_contact` | `transcript_ai` | `system`
+- `author_type`: `owner` | `friend` | `contact` | `ai` | `system`
+- `author_uid`: 発言者の uid（`contact`/`ai`/`system` は null）
+- `author_name`: 表示名のデノーマライズ（画面表示専用）
+- `text`: 表示・AI 注入用のプレーンテキスト
+- `mentioned_uids`: 友人コメント内の @mention 対象
+- `payload`: 位置情報など構造化データ（`note`/`location` 用、既存のまま）
+- `created_at`
+- `delivered_to_ai_at`: backend が AI へ注入した時刻（`friend_comment`/`note`/`location` のみ）
+
+P0 実装は `type: note` と `type: location` だけを書き込めばよく、このスキーマのまま後方互換になる。P1 では `friend_comment`、`transcript_contact`、`transcript_ai` を追加するだけで Discord 風 UI に必要なデータが揃う。
+
+### Firestore rules の方針
+
+- `emergency_events` の read は `participant_uids` 配列のみで判定する。
+- `updates` サブコレクションの read は親ドキュメントの `participant_uids` を 1 回 `get()` して判定する（rules のネストした `get()` は増やさない）。
+- `friend_comment` の create は `request.auth.uid in participant_uids` かつ `request.resource.data.author_uid == request.auth.uid` を要求する。
+- 友人の同時 listener 数が増えると読み取り課金が増える。MVP 後の規模次第でページングや要約表示への切り替えを検討する（数名規模の同時視聴を前提にした設計）。
 
 ## 7. Safety gate と一回だけの発信
 
@@ -199,10 +259,14 @@ flowchart LR
 - `POST /v1/locations` - 位置と住所を保存する
 - `POST /v1/emergency-events` - 冪等にイベントを作成し発信する
 - `GET /v1/emergency-events/{id}` - 発信状態を取得する
-- `POST /v1/emergency-events/{id}/updates` - メモまたは位置を追加する
+- `POST /v1/emergency-events/{id}/updates` - メモ、位置、または（P1 で）友人コメントを追加する。`type: friend_comment` は `participant_uids` に含まれるユーザーのみ許可する。
+- `GET /v1/emergency-events` - 自分が所有する、または `participant_uids` に含まれる進行中・過去イベントの一覧を取得する（P1）
 - `POST /v1/twilio/voice` - TwiML を返す
 - `POST /v1/twilio/status` - 通話状態 callback を受ける
 - `WSS /v1/twilio/media` - 双方向 Media Stream を受ける
+- `POST /v1/friends/invitations` - 招待コードを発行する（P1）
+- `POST /v1/friends/invitations/{code}/accept` - 招待を承認し `friend_links` を `accepted` にする（P1）
+- `GET /v1/friends` - 承認済み友人一覧を取得する（P1）
 
 すべての Android API は Firebase ID token を要求する。Twilio webhook と WebSocket は Twilio 署名を検証する。ログには Authorization、電話番号、API key、音声 payload を記録しない。
 
@@ -250,8 +314,10 @@ flowchart LR
 - GCP/Firebase project ID: `ethglobaltokyo2026lifelink`
 - GCP/Firebase project number: `1023311564471`
 - Firebase Android package name: `com.rtree.LIFELiNK`
-- Firebase Android app ID（登録後に追記）
-- Cloud Run service 名（登録後に追記）、region: `asia-northeast1`、URL と revision 名（デプロイ後に追記）
+- Firebase Android app ID: `1:1023311564471:android:b4e6ad83334551f40e0732`
+- Cloud Run service: `lifelink-backend`、region: `asia-northeast1`
+- Cloud Run URL: `https://lifelink-backend-1023311564471.asia-northeast1.run.app`
+- Cloud Run revision: `lifelink-backend-00002-lgf`
 - Firestore database ID: `(default)`、region: `asia-northeast1`
 - Cloud Run service account: `lifelink-backend@ethglobaltokyo2026lifelink.iam.gserviceaccount.com`
 - Secret 名と version（値は記録しない）
@@ -265,7 +331,7 @@ flowchart LR
 - Android package name、GCP project、Firebase ログイン方式、Cloud Run region、Firestore location は決定済み。
 - GCP billing、Twilio、OpenAI の利用可能状態を確認する。
 - Secret Manager を先に用意し、それから外部サービスの秘密値を登録する。
-- 完了条件: Agent が対象 project へ CLI でアクセスでき、秘密値を表示せずデプロイに利用できる。
+- 完了条件: Agent が対象 project へ CLI でアクセスでき、秘密値を表示せずデプロイに利用できる。2026-09-25 に Firebase、Firestore、Cloud Run と実行サービスアカウントを構成し、Cloud Run の `/health` で HTTP 200 を確認済み。
 
 ### Phase 1: Android とデータ登録
 
@@ -310,6 +376,7 @@ flowchart LR
 - AI が誤った位置を作らないよう、位置情報の文面は backend が生成する。
 - 通話相手には冒頭で AI による自動電話であることを明示する。
 - 実番号へのテスト発信は、発信先の事前同意と時間帯の確認後に行う。
+- 友人共有イベントの閲覧権限は `emergency_events.participant_uids` のイベント作成時スナップショットで判定し、事後の友人追加・削除では過去イベントの可視性を変えない。
 
 ## 13. 未決事項
 

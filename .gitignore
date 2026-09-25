@@ -1,0 +1,15 @@
+.DS_Store
+.vscode/
+.env
+.env.*
+!.env.example
+node_modules/
+dist/
+*.log
+
+# Android
+.gradle/
+local.properties
+**/build/
+*.jks
+*.keystore
