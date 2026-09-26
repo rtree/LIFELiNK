@@ -41,9 +41,9 @@ class EmergencySafetyGate(context: Context) {
             .apply()
     }
 
-    // Returns the press reason when a long-press packet starts a new press, or null otherwise.
+    // Returns the press reason when a pressed (non-idle) packet starts a new press, or null otherwise.
     @Synchronized
-    fun observeBeaconState(stateKey: String, longPress: Boolean, packetAtMillis: Long): String? {
+    fun observeBeaconState(stateKey: String, pressed: Boolean, packetAtMillis: Long, burstSeconds: Int): String? {
         val lastKey = preferences.getString(LAST_BEACON_STATE, null)
         val lastAt = preferences.getLong(LAST_BEACON_SEEN_AT, 0L)
         if (packetAtMillis < lastAt) return null
@@ -51,10 +51,12 @@ class EmergencySafetyGate(context: Context) {
             .putString(LAST_BEACON_STATE, stateKey)
             .putLong(LAST_BEACON_SEEN_AT, packetAtMillis)
             .apply()
-        if (!longPress) return null
+        if (!pressed) return null
+        // Gap must exceed the button's burst: screen-off delivery can gap >40s inside a single 60s burst.
+        val gapMs = (burstSeconds + BEACON_GAP_MARGIN_SECONDS) * 1000L
         return when {
             lastKey != stateKey -> "状態切替"
-            packetAtMillis - lastAt > BEACON_BURST_GAP_MS -> "${BEACON_BURST_GAP_MS / 1000}秒ぶり"
+            packetAtMillis - lastAt > gapMs -> "${gapMs / 1000}秒ぶり"
             else -> null
         }
     }
@@ -64,7 +66,6 @@ class EmergencySafetyGate(context: Context) {
         const val ACTIVE_CONTACT_ID = "active_contact_id"
         const val LAST_BEACON_SEEN_AT = "last_beacon_seen_at"
         const val LAST_BEACON_STATE = "last_beacon_state"
-        // Must exceed the button's 60s burst: screen-off delivery can gap >40s inside a single burst.
-        const val BEACON_BURST_GAP_MS = 75_000L
+        const val BEACON_GAP_MARGIN_SECONDS = 15
     }
 }

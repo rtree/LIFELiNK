@@ -439,6 +439,26 @@ private fun SetupScreen() {
                 },
             )
         }
+        var beaconBurstSeconds by remember { mutableStateOf(emergencyPreferences.beaconBurstSeconds) }
+        Text("ボタンのアドバタイズ送信時間（メーカーアプリの設定と合わせる）: ${beaconBurstSeconds}秒")
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            listOf(10, 60).forEach { seconds ->
+                Button(
+                    modifier = Modifier.weight(1f),
+                    enabled = beaconBurstSeconds != seconds,
+                    onClick = {
+                        emergencyPreferences.beaconBurstSeconds = seconds
+                        beaconBurstSeconds = seconds
+                        AdvertisementRegistry.appendBeaconLog("送信時間設定=${seconds}秒（途切れ判定 ${seconds + 15}秒）")
+                    },
+                ) {
+                    Text("${seconds}秒")
+                }
+            }
+        }
         Text(
             if (monitoringRunning) {
                 "見守り中：通知欄に「LIFELiNK 見守り中」が出ている間だけボタンを待ち受けます"
@@ -557,7 +577,10 @@ private fun AdvertisementLinkSection(
     Text(
         linkedDevice?.let { device ->
             "リンク済み: ${device.transport.label} / ${device.title}\n" +
-                device.beaconSlots.joinToString("\n") { "・${it.label}" }
+                device.beaconSlots.joinToString("\n") {
+                    "・${it.label}${if (it == device.beaconIdleSlot) "（待機・発信しない）" else "（押下で発信）"}"
+                } +
+                if (device.transport == TriggerTransport.BEACON && device.beaconIdleSlot == null) "\n※待機スロット未判定のため発信しません。リンクし直してください" else ""
         } ?: "未リンク: 発信トリガーは無効です。自分のボタンをリンクしてください",
     )
     Text(
@@ -646,8 +669,11 @@ private fun AdvertisementObservationCard(
             Text(observation.detail, style = MaterialTheme.typography.bodySmall)
             if (observation.beaconSlots.isNotEmpty()) {
                 Text(
-                    "観測スロット ${observation.beaconSlots.size}件:\n" +
-                        observation.beaconSlots.joinToString("\n") { "・${it.label}" },
+                    "観測スロット ${observation.beaconSlots.size}件（最多パケット=待機）:\n" +
+                        observation.beaconSlots.joinToString("\n") { slot ->
+                            "・${slot.label} ×${observation.beaconSlotCounts[slot] ?: 0}" +
+                                if (slot == observation.inferredIdleSlot) " ←待機" else ""
+                        },
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
@@ -679,7 +705,7 @@ private fun AdvertisementObservationCard(
                         Text("このBeaconをリンク")
                     }
                     Text(
-                        "リンク後はこの機器のボタン1/2どちらの長押しでも発信候補になります（短押し・待機広告では発信しません）",
+                        "リンク後は待機以外のスロット（ボタン1/2、短押し/長押し）へ変わった瞬間に発信します",
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }

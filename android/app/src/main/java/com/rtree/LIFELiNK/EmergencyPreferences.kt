@@ -11,6 +11,7 @@ data class LinkedTriggerDevice(
     val detail: String,
     val deviceAddress: String?,
     val beaconSlots: List<BeaconSlot>,
+    val beaconIdleSlot: BeaconSlot?,
     val gattServiceUuid: String?,
 )
 
@@ -54,6 +55,13 @@ class EmergencyPreferences(context: Context) {
             preferences.edit().putBoolean(BEACON_DRY_RUN, value).apply()
         }
 
+    // Must match the maker app's advertising duration (10s or 60s) on the physical button.
+    var beaconBurstSeconds: Int
+        get() = preferences.getInt(BEACON_BURST_SECONDS, 60)
+        set(value) {
+            preferences.edit().putInt(BEACON_BURST_SECONDS, value).apply()
+        }
+
     var linkedTriggerDevice: LinkedTriggerDevice?
         get() = preferences.getString(LINKED_TRIGGER_DEVICE, null)?.let { encoded ->
             runCatching {
@@ -70,6 +78,9 @@ class EmergencyPreferences(context: Context) {
                             BeaconSlot(slot.getString("uuid"), slot.getInt("major"), slot.getInt("minor"))
                         }
                     }.orEmpty(),
+                    beaconIdleSlot = json.optJSONObject("beacon_idle_slot")?.let { slot ->
+                        BeaconSlot(slot.getString("uuid"), slot.getInt("major"), slot.getInt("minor"))
+                    },
                     gattServiceUuid = json.optString("gatt_service_uuid").takeIf(String::isNotBlank),
                 )
             }.getOrNull()
@@ -93,6 +104,17 @@ class EmergencyPreferences(context: Context) {
                             },
                         ),
                     )
+                    .apply {
+                        device.beaconIdleSlot?.let { slot ->
+                            put(
+                                "beacon_idle_slot",
+                                JSONObject()
+                                    .put("uuid", slot.uuid)
+                                    .put("major", slot.major)
+                                    .put("minor", slot.minor),
+                            )
+                        }
+                    }
                     .put("gatt_service_uuid", device.gattServiceUuid.orEmpty())
                     .toString()
             }
@@ -108,6 +130,7 @@ class EmergencyPreferences(context: Context) {
             detail = observation.detail,
             deviceAddress = observation.deviceAddress,
             beaconSlots = observation.beaconSlots,
+            beaconIdleSlot = observation.inferredIdleSlot,
             gattServiceUuid = observation.gattServiceUuid,
         )
     }
@@ -119,5 +142,6 @@ class EmergencyPreferences(context: Context) {
         const val WORLD_ID_FLOW_ID = "world_id_flow_id"
         const val LINKED_TRIGGER_DEVICE = "linked_trigger_device"
         const val BEACON_DRY_RUN = "beacon_dry_run"
+        const val BEACON_BURST_SECONDS = "beacon_burst_seconds"
     }
 }

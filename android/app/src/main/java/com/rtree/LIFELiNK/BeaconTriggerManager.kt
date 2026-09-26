@@ -179,13 +179,21 @@ class BeaconReceiver : BroadcastReceiver() {
             return
         }
         val safetyGate = EmergencySafetyGate(context)
+        val preferences = EmergencyPreferences(context)
+        val idleSlot = preferences.linkedTriggerDevice?.beaconIdleSlot
+        if (idleSlot == null) {
+            Log.w(LOG_TAG, "Ignored Beacon: linked device has no idle slot, relink required")
+            return
+        }
+        val burstSeconds = preferences.beaconBurstSeconds
         var pressed: Pair<ScanResult, String>? = null
         fresh.sortedBy { it.timestampNanos }.forEach { packet ->
             val identity = AdvertisementRegistry.parseIBeacon(packet) ?: return@forEach
             val reason = safetyGate.observeBeaconState(
                 stateKey = "${identity.slot.label}|${identity.longPress}",
-                longPress = identity.longPress,
+                pressed = identity.slot != idleSlot,
                 packetAtMillis = AdvertisementRegistry.packetWallMillis(packet),
+                burstSeconds = burstSeconds,
             )
             Log.i(
                 LOG_TAG,
@@ -211,7 +219,7 @@ class BeaconReceiver : BroadcastReceiver() {
         val packetAt = AdvertisementRegistry.packetWallMillis(packet)
         val identity = AdvertisementRegistry.parseIBeacon(packet)
         AdvertisementRegistry.appendBeaconLog(
-            "長押し受理($reason) [$path] [${AdvertisementRegistry.deviceLabel(runCatching { packet.device.address }.getOrNull())}] " +
+            "押下受理($reason) [$path] [${AdvertisementRegistry.deviceLabel(runCatching { packet.device.address }.getOrNull())}] " +
                 "${identity?.slot?.label} pkt=${formatLogTime(packetAt)} " +
                 "受信遅延=${AdvertisementRegistry.packetAgeMillis(packet)}ms RSSI=${packet.rssi} " +
                 AdvertisementRegistry.screenState(context),

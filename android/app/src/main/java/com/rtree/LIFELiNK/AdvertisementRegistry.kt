@@ -39,10 +39,14 @@ data class AdvertisementObservation(
     val deviceAddress: String?,
     val beaconSlot: BeaconSlot? = null,
     val beaconSlots: List<BeaconSlot> = emptyList(),
+    val beaconSlotCounts: Map<BeaconSlot, Int> = emptyMap(),
     val beaconBatteryLow: Boolean? = null,
     val beaconLongPress: Boolean? = null,
     val gattServiceUuid: String? = null,
-)
+) {
+    // The idle advertisement dominates packet counts because presses only override it briefly.
+    val inferredIdleSlot: BeaconSlot? get() = beaconSlotCounts.maxByOrNull { it.value }?.key
+}
 
 // +Beacon Major: bit15 = battery low, bit14 = long press, bits0-13 = configured slot Major.
 data class IBeaconIdentity(
@@ -106,9 +110,12 @@ object AdvertisementRegistry {
         val parsed = parse(result, now) ?: return null
         val previous = mutableObservations.value.firstOrNull { it.key == parsed.key }
         val slots = (previous?.beaconSlots.orEmpty() + listOfNotNull(parsed.beaconSlot)).distinct()
+        val counts = previous?.beaconSlotCounts.orEmpty().toMutableMap()
+        parsed.beaconSlot?.let { counts[it] = (counts[it] ?: 0) + 1 }
         val updated = parsed.copy(
             seenCount = (previous?.seenCount ?: 0) + 1,
             beaconSlots = slots,
+            beaconSlotCounts = counts,
         )
         recordIBeaconTransition(context, result, updated)
         mutableObservations.value = (mutableObservations.value.filterNot { it.key == updated.key } + updated)
