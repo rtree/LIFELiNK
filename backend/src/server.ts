@@ -120,6 +120,7 @@ const emergencyEventSchema = z.object({
   emergency_event_id: z.uuid(),
   contact_id: z.string().min(1).max(128),
   trigger_type: z.enum(["screen_button", "ble"]),
+  trigger_source: z.enum(["beacon", "gatt"]).nullish(),
   location_snapshot: z
     .object({
       latitude: z.number().min(-90).max(90),
@@ -271,8 +272,13 @@ app.post(
 
       transaction.create(eventRef, {
         uid: request.user.uid,
+        participant_uids: [],
         contact_id: parsed.data.contact_id,
         trigger_type: parsed.data.trigger_type,
+        trigger_source:
+          parsed.data.trigger_type === "ble"
+            ? (parsed.data.trigger_source ?? "beacon")
+            : null,
         state: "accepted",
         location_snapshot: parsed.data.location_snapshot
           ? sanitizeLocationForPersistence(parsed.data.location_snapshot)

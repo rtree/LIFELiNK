@@ -2,6 +2,8 @@
 
 最終更新: 2026-09-26
 
+> 新しいセッションで作業を再開する場合は、本文書より先に `reference/handover.md`（壊してはいけない不変条件、環境・ビルド・デプロイ・確認コマンド、既知の落とし穴）を読むこと。本文書は設計の正本であり、必要な章だけを参照すればよい。
+
 ## 1. プロダクトのゴール
 
 声を出せない状況でユーザーがボタンを押すと、LIFELiNK が事前登録済みの連絡先へ AI 音声で電話し、発信前までに収集できた現在地・住所・状況を通話の最初に伝える。
@@ -345,9 +347,10 @@ users/{uid}/linkedTriggers/{trigger_id}:
 ### `emergency_events/{emergency_event_id}`
 
 - `uid`
+- `participant_uids`: イベント作成時のスナップショット。P0 は友人共有を実装していないため常に空配列だが、`firestore.rules` の読み取り判定がこのフィールドを前提にしているので必ず書く（2026-09-26 に未書き込みを修正）
 - `contact_id`
 - `trigger_type`: `screen_button` または `ble`
-- `trigger_source`: `trigger_type` が `ble` のときのみ `beacon` または `gatt`
+- `trigger_source`: `trigger_type` が `ble` のときのみ `beacon` または `gatt`（クライアントが送らない場合は backend が `beacon` を補う。`ble` 以外は `null`）
 - `state`: `accepted`、`dialing`、`in_progress`、`completed`、`failed`
 - `location_snapshot`（`address`/`captured_at`/`geocoded_at` のみ。GPS 座標・精度は含まない）
 - `initial_note`

@@ -2,6 +2,8 @@
 
 最終更新: 2026-09-26
 
+> 新しいセッションは `reference/handover.md` を先に読むこと。本ファイルは「次に何をやるか」の正本。
+
 状態: `TODO` / `IN PROGRESS` / `BLOCKED` / `DONE`
 
 ## P0: MVP 主線（電話・iBeacon の実通話は完了、Discord 個別連絡は次の未完了区間）

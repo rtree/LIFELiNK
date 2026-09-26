@@ -4,6 +4,8 @@
 
 > 物理ボタン（＋Beacon）または画面ボタン → Android Safety gate → Cloud Run → Twilio が登録先へ電話 → OpenAI Realtime の AI が現在地（都道府県）とメモを伝えて会話 → 同時に Discord Bot が同意済み友人へ DM → 通話の書き起こし（相手/AI）を DM に逐次中継 → 友人が「状況を返信」を何度でも送信 → 返信が同じイベントに保存され、通話中の AI が相手に伝える。
 
+**このスナップショット以降の変更**: 2026-09-26 に `emergency_events` へ `participant_uids`（常に空配列）と `trigger_source`（`ble` のとき既定 `beacon`）を書く修正を入れ、revision `lifelink-backend-00026-g6n` をデプロイした（`doc/plan.md` 6 章・`firestore.rules` が前提にしていたフィールドが未書き込みだったため）。動作条件は本ファイルのまま。
+
 ## 1. 固定点（この組み合わせで動作確認済み）
 
 | 対象 | 値 |
