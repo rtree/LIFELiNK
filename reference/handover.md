@@ -112,10 +112,11 @@ ssh beacon-host '"$HOME/Library/Android/sdk/platform-tools/adb" -s RFGL41GKP0Z l
 | --- | --- | --- |
 | Beacon リンク情報のアカウント同期 | 設計のみ（`users/{uid}/linkedTriggers` 案） | `doc/plan.md` 6 章・1a 章 1 |
 | `GET /v1/contacts` / `GET /v1/emergency-events`（一覧系） | **実装しないと決定**（P1-16）。ライブフィードは Android から Firestore を直接 read する | `doc/plan.md` 6a 章「Android ライブフィードの実装方針」 |
-| P2（`emergencySessions`/`facts`/`timeline`/`delegations`） | スキーマ凍結・rules と indexes はデプロイ済み、実装ゼロ | `doc/tasks.md` P2-01〜P2-07 |
-| Full UI（`doc/uimock/` の 20 画面） | 設計凍結済み、実装は検証用 1 画面のみ | `doc/plan.md` 4a 章、P1-16/P1-17 |
-| 英語化 | 文言は Kotlin 内にハードコードされた日本語（約 80 箇所、`MainActivity.kt` に集中）。`values-en` なし | P1-17（触る画面から段階的に） |
-| 失敗系（権限拒否・通信断・外部 API 障害）の網羅 | 未実施 | `doc/tasks.md` P3-01〜P3-04 |
+| 状況ストア（`emergencySessions`/`facts`/`timeline`/`delegations`） | スキーマ凍結・rules と indexes はデプロイ済み、実装ゼロ。**ハッカソンでは実装しないと決定**し PX へ退避 | `doc/tasks.md` PX-14〜PX-19、`doc/plan.md` 8a 章 |
+| Full UI（`doc/uimock/` の 20 画面） | 3 タブ（Home/Members/Settings）まで実装。モック全 20 画面には届いていない | `doc/plan.md` 4a 章 |
+| 周辺音の取り込み | 調査完了・マイク権限の事前取得のみ実装。録音・解析は未実装。**ロック中に録れるかは未検証** | `reference/ambient-verification.md`、P2-09〜P2-11 |
+| 英語化 | **完了**。Android・AI の発話・Discord すべて英語（残る日本語は技適番号のみ）。`values/strings.xml` 抽出は未実施 | `doc/plan.md` 4a 章 |
+| 失敗系（権限拒否・通信断・外部 API 障害）の網羅 | 未実施。PX へ退避し、実運用を回しながら直す方針へ変更 | `doc/tasks.md` PX-20〜PX-23 |
 | 通話相手への「内容を友人と共有している」告知 | デモのため意図的に入れていない | `doc/plan.md` 4a 章、製品化時に再検討 |
 
 ## 7. 直近で直した設計ドリフト（再発させない）

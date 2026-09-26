@@ -136,6 +136,12 @@ private fun SetupScreen() {
     val observedAdvertisements by AdvertisementRegistry.observations.collectAsStateWithLifecycle()
     val beaconLog by AdvertisementRegistry.beaconLog.collectAsStateWithLifecycle()
     var beaconDryRun by remember { mutableStateOf(emergencyPreferences.beaconDryRun) }
+    var micGranted by remember { mutableStateOf(hasMicrophonePermission(context)) }
+    val requestMicrophonePermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        micGranted = granted
+    }
 
     LaunchedEffect(initialUser?.uid) {
         val claims = initialUser?.getIdToken(false)?.await()?.claims.orEmpty()
@@ -608,6 +614,37 @@ private fun SetupScreen() {
                     ) {
                         Text("Update my location")
                     }
+
+                    HorizontalDivider()
+                    Text("Listening (coming soon)", style = MaterialTheme.typography.titleLarge)
+                    Text(
+                        "During an emergency LIFELiNK will listen to what is happening around you and " +
+                            "turn it into short notes for your contact and your members. Recordings are " +
+                            "never saved. Grant the microphone now so no permission dialog appears when " +
+                            "you actually need help.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        if (micGranted) "Microphone: allowed" else "Microphone: not allowed yet",
+                        color = if (micGranted) {
+                            MaterialTheme.colorScheme.onSurface
+                        } else {
+                            MaterialTheme.colorScheme.error
+                        },
+                    )
+                    Button(
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !micGranted,
+                        onClick = { requestMicrophonePermission.launch(Manifest.permission.RECORD_AUDIO) },
+                    ) {
+                        Text("Allow microphone")
+                    }
+                    Text(
+                        "Listening itself is not implemented yet.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
 
                     HorizontalDivider()
                     Text("Physical button", style = MaterialTheme.typography.titleLarge)
@@ -1180,6 +1217,12 @@ private fun hasLocationPermission(context: Context): Boolean =
             context,
             Manifest.permission.ACCESS_COARSE_LOCATION,
         ) == PackageManager.PERMISSION_GRANTED
+
+private fun hasMicrophonePermission(context: Context): Boolean =
+    ContextCompat.checkSelfPermission(
+        context,
+        Manifest.permission.RECORD_AUDIO,
+    ) == PackageManager.PERMISSION_GRANTED
 
 @Suppress("DEPRECATION")
 private suspend fun reverseGeocode(

@@ -73,37 +73,48 @@ MVP 主線（P0-01〜P0-21）は完了し `mvp-0.1` として保全済み。こ�
 | P1-06a | TODO | `users/{uid}` へ `nickname`/`area` フィールドを追加し、プロフィール設定画面（モック 1-5）を実装する | P1-16 | ニックネームとエリアを保存・再取得でき、エリアを住所表示や連絡先の文脈情報に利用できる |
 | P1-06b | TODO | 端末ローカルの 2 段階音声アナウンス（送信時 stage1・接続時 stage2、JP/EN/両方、Silent SOS トグル）を実装する | P0-09、P0-13（`in-progress`/`answered` を判定する Twilio status） | 送信直後に stage1 が即時発話され、Twilio status が `answered`/`in-progress` を報告した時だけ stage2 が発話される。Silent SOS 有効時は両方無音になる |
 
-## P2: GPT Live 状況ストアと Responses delegation
+## P2: 周辺音の取り込み（現行スキーマの上に実装）
 
-`doc/plan.md` 8a 章の設計に対応する実装タスク。**2026-09-26 優先順位更新: 電話+iBeacon 完了 → Discord 個別連絡 P0-16〜P0-20 → P2 最小パス → Full UI と delegations を並行**。Discord の初回実測には既存の `emergency_events`/`updates` を用い、P2 が出来上がるまで待たない。既存テストデータは移行せず、P2 着手後の新規イベントから `emergencySessions` を使う。
+**2026-09-26 方針転換（人間判断）**: 8a 章の `emergencySessions`/`facts`/`timeline`/`delegations` への移行（旧 P2-01〜06）は
+**ハッカソンでは実装しない**と決め、PX-14〜PX-19 へ退避した。理由は 3 つ:
 
-| ID | 状態 | タスク | 依存 | 完了条件 |
-| --- | --- | --- | --- | --- |
-| P2-01 | TODO | `situationStore.ts`: `facts` の append・`state/current` の materialization・`sequence` 採番・認可を実装する（ルート直下の `emergencySessions/{session_id}` 配下。`participant_uids` のスナップショット生成はこのタスク自体で実装し、PX-01 を待たない）。Discord 返信の `friend_reply` 移行先も確認する | P0-21 | Android/Discord の fact が一度だけ保存され、`state/current` の `version` が単調増加する |
-| P2-02 | TODO | `timelineStore.ts`: `timeline` への transcript/UI 履歴書き込みを実装する（8a 章の `delivery` 状態遷移を含む） | P2-01 | 割り込み時に `conversation.item.truncate` と連動して `interrupted` が記録される |
-| P2-03 | TODO | `realtimeTools.ts`: `get_current_situation`/`get_session_history` の同期 tool と routing 規則を実装する | P2-01、P2-02 | 「今どこ」「さっき何と言ったか」に根拠 `fact_id` 付きで即答できる |
-| P2-04 | TODO | `delegationStore.ts` + `responsesDelegate.ts`: `delegate_investigation` の非同期委譲（`background: true`、poll、`call_id` 冪等化）を実装する | P2-03 | 保留発話が一回だけ発話され、Responses 完了後に同じ通話へ結果が音声で返る |
-| P2-05 | TODO | `realtimeBridge.ts`: 既存 `voice.ts` の Media Stream bridge を tool event 処理・OOB 保留・結果注入・truncation 込みで発展させる | P2-01〜P2-04 | 通話終了後の delegation 結果は音声注入されず履歴のみに保存される |
-| P2-06 | TODO | 認可・rate limit・ログ非記録の横断実装（8a 章「認可・安全」）と障害時のフォールバック文言を実装する | P2-01〜P2-05 | stale/unknown/timeout/failure を捏造せず明示し、重複 event/tool call/delegation で二重発話・二重発信しない |
-| P2-07 | TODO | 周辺のスピーカー・カメラから解析したテキスト要約を `facts.kind: ambient_observation` として保存する取り込みパスを実装する（生の音声・画像データは保存・送信しない） | P2-01、同意・法務判断 | 明示同意のもとで解析済みテキストが fact として保存され、通話中の AI と Discord 経由の質問応答に使える。生データはどこにも永続化されない |
+1. やりたいこと（周辺音の取り込み）に新コレクションが要らない。既存の `emergency_events/{id}/updates` に
+   `type: "ambient"` を 1 つ追加すれば済み、ライブフィードの mapper も 1 行で対応できる。
+2. 旧 P2 の本体は `voice.ts` の作り替えで、そこは最も壊れやすく、提出前に再度不安定にする理由がない。
+3. 凍結したスキーマと rules/indexes はデプロイ済みで、放置しても害がない。設計済み・実装は将来、で良い。
 
-## P3: 異常系・堅牢化（後回し、2026-09-26 人間判断）
-
-前進を優先し、以下は主線・Discord・P2 の後にまとめて実施する。既存の二重発信防止（Safety gate・backend 冪等性）は実装済みのまま維持する。
+`doc/plan.md` 8a 章は**設計文書としてそのまま残す**（削除しない）。
 
 | ID | 状態 | タスク | 依存 | 完了条件 |
 | --- | --- | --- | --- | --- |
-| P3-01 | TODO | 実端末で失敗系を確認する（権限拒否、通信断、Twilio/OpenAI/World ID 障害、認証切れ、通話中の再押下、**片方向音声（AI の声だけ聞こえない）の再現・検知・復旧**） | P0-15 | いずれでも二重発信せず、Android に状態と次の操作が表示される証跡がある。片方向音声は `reference/handover.md` 5 章の切り分け手順で backend 側か回線側かを判別できる |
-| P3-02 | TODO | Beacon 見守りの長時間ロック（15 分〜2 時間）・APK 更新/再起動後の復帰・通知権限拒否時の挙動を測る | P0-15 | heartbeat 欠落・受信遅延・見落としの観測値を `doc/plan.md` 6b 章へ記録 |
-| P3-03 | TODO | 画面 OFF 直後の受信空白（2026-09-26 11:50 に 38 秒、別の回は 0.6 秒）を定量化する: (1) adb で画面 OFF/ON を 10 回自動反復し待機スロットの受信間隔を集計、(2) 空白の中と外で人が押下して取りこぼしを確認、(3) 画面 OFF/ON と受信再開ギャップをアプリ内ログに残し USB 非接続でも測る、(4) 画面 OFF 時のスキャン再登録で空白が消えるか試す | P0-15 | 空白の発生率・長さ・条件（USB 充電有無含む）と対策の効果が `doc/plan.md` 6b 章に記録され、送信時間 10 秒を維持するか判断できる |
-| P3-04 | TODO | ボタンの死活表示: 待機スロットの最終受信時刻を常駐通知と画面に出し、一定時間未受信で「ボタンが見つかりません（範囲外・電池切れ・停止中 IDLE の可能性）」、電池低下 bit で「電池交換」を警告する。初期設定に「RUNNING・ボタン検知モード・送信時間 10 秒」の確認項目を追加する | P3-03（警告しきい値の根拠） | IDLE 化・電池抜き・範囲外で警告が出て、復帰で消えることを実機確認 |
+| P2-07 | IN PROGRESS | 周辺音を短いテキスト観測に変えて取り込む（生の音声は永続化しない） | 同意・法務判断 | 調査完了・実装未着手。可否と制約は `reference/ambient-verification.md` に集約。**当初の `facts.kind: ambient_observation` ではなく、既存の `emergency_events/{id}/updates` に `type: "ambient"` を追加する形へ変更**（P2-01〜06 を PX へ退避したため） |
+| P2-08 | DONE | マイク権限とマニフェスト宣言を「事前設定」として用意する（緊急時に権限ダイアログを出さないため） | P1-17 | `RECORD_AUDIO` / `FOREGROUND_SERVICE_MICROPHONE` を宣言し、Settings から事前に許可を取れる。許可状態が画面に出る |
+| P2-09 | TODO | `microphone` 種別の FGS を実装し、**画面 OFF・ロック中に実際に非無音の PCM が取れるかを実機で測る** | P2-08 | `reference/ambient-verification.md` 5 章のチェックリストを埋める。`AudioRecord.registerAudioRecordingCallback()` で `isClientSilenced()` を常に記録し、「録れている」と「送れている」を分けて計る |
+| P2-10 | TODO | 15 秒チャンクを backend へ POST し、`gpt-4o-mini-transcribe` の結果だけを `updates.type: "ambient"` へ保存する取り込みパス | P2-09 | 無音チャンク（RMS 閾値以下）は送らない。音声バイトは Firestore ・ログ・一時ファイルのどこにも残さない。**AI への注入は間引く**（意味が変わったときだけ・最短間隔あり）。さもないと通話が実況中継になる |
+| P2-11 | TODO | 非発話音（叫び声・ガラス・アラーム）を MediaPipe + YAMNet で端末内分類する | P2-10、時間が余った場合 | 追加コスト $0 で「Screaming」「Glass」等を同じ `ambient` へ書く。音声は端末から出ない |
+
+## P3（欠番）
+
+2026-09-26 の判断で **P3-01〜P3-04 は PX-20〜PX-23 へ移した**。番号は再利用しない。
+当面の堅牢化は、事前に組んだ試験項目を消し込むのではなく、**実端末で縦断フローを何度も回し、壊れたものをその場で直す**やり方で進める。
+そこで見つかった問題はこの文書に新しいタスクとして追加し、原因と切り分け手順は `reference/handover.md` 5 章へ書き出すこと。
 
 ## PX: ストレッチゴール（優先度は最低・提出スコープ外）
 
-提出までの主線（P1）・P2・P3 がすべて片付き、それでも時間が余った場合にだけ着手する。**着手しないまま提出することを前提に計画する**。2026-09-26 に旧 P1-02〜P1-06（アプリ同士の友人リンク）と旧 P1-08〜P1-15（GATT）をここへ移した。旧番号は欠番のまま再利用しない。
+提出までの主線（P1・P2）が片付き、それでも時間が余った場合にだけ着手する。**着手しないまま提出することを前提に計画する**。2026-09-26 に旧 P1-02〜P1-06（アプリ同士の友人リンク）と旧 P1-08〜P1-15（GATT）をここへ移し、同日さらに旧 P2-01〜P2-06（状況ストア）と旧 P3-01〜P3-04（異常系）も移した。旧番号は欠番のまま再利用しない。
 
 | ID | 旧 ID | 状態 | タスク | 依存 | 完了条件 |
 | --- | --- | --- | --- | --- | --- |
+| PX-14 | P2-01 | TODO | `situationStore.ts`: `facts` の append・`state/current` の materialization・`sequence` 採番・認可（ルート直下の `emergencySessions/{session_id}` 配下） | 提出後に継続する場合のみ | fact が一度だけ保存され、`state/current` の `version` が単調増加する |
+| PX-15 | P2-02 | TODO | `timelineStore.ts`: `timeline` への transcript/UI 履歴書き込み（8a 章の `delivery` 状態遷移を含む） | PX-14 | 割り込み時に `conversation.item.truncate` と連動して `interrupted` が記録される |
+| PX-16 | P2-03 | TODO | `realtimeTools.ts`: `get_current_situation`/`get_session_history` の同期 tool と routing 規則 | PX-14、PX-15 | 「今どこ」「さっき何と言ったか」に根拠 `fact_id` 付きで即答できる |
+| PX-17 | P2-04 | TODO | `delegationStore.ts` + `responsesDelegate.ts`: `delegate_investigation` の非同期委譲（`background: true`、poll、`call_id` 冪等化） | PX-16 | 保留発話が一回だけ発話され、Responses 完了後に同じ通話へ結果が音声で返る |
+| PX-18 | P2-05 | TODO | `realtimeBridge.ts`: 既存 `voice.ts` の Media Stream bridge を tool event 処理・OOB 保留・結果注入・truncation 込みで発展させる | PX-14〜PX-17 | 通話終了後の delegation 結果は音声注入されず履歴のみに保存される |
+| PX-19 | P2-06 | TODO | 認可ヺrate limit・ログ非記録の横断実装と障害時のフォールバック文言 | PX-14〜PX-18 | stale/unknown/timeout/failure を捿造せず明示し、重複 event/tool call/delegation で二重発話・二重発信しない |
+| PX-20 | P3-01 | TODO | 実端末で失敗系を網羅的に確認する（権限拒否、通信断、Twilio/OpenAI/World ID 障害、認証切れ、通話中の再押下、片方向音声） | 時間が余った場合のみ | いずれでも二重発信せず、Android に状態と次の操作が表示される証跡がある。切り分けは `reference/handover.md` 5 章 |
+| PX-21 | P3-02 | TODO | Beacon 見守りの長時間ロック（15 分〜2 時間）・APK 更新/再起動後の復帰・通知権限拒否時の挙動を測る | 時間が余った場合のみ | heartbeat 欠落・受信遅延・見落としの観測値を `doc/plan.md` 6b 章へ記録 |
+| PX-22 | P3-03 | TODO | 画面 OFF 直後の受信空白（38 秒の実測あり）を定量化し、送信時間 10 秒を維持するか判断する | 時間が余った場合のみ | 空白の発生率・長さ・条件と対策の効果が `doc/plan.md` 6b 章に記録される |
+| PX-23 | P3-04 | TODO | ボタンの死活表示（最終受信時刻、未受信警告、電池低下警告、初期設定の確認項目） | PX-22（警告しきい値の根拠） | IDLE 化・電池抜き・範囲外で警告が出て、復帰で消えることを実機確認 |
 | PX-01 | P1-02 | TODO | LIFELiNK アプリ同士の友人リンクが Discord で代替できないか再評価し、必要な場合だけ `friend_links`・相互承認 API を設計/実装する | 将来の再判断 | 採用すると決めた場合に限り、本人確認を伴う相互リンクが成立。P1・P2 を待たせない |
 | PX-02 | P1-03 | TODO | アプリ内友人リンクを採用する場合のみ `emergencySessions.participant_uids` に承認済み Firebase UID をスナップショットする | PX-01 を実装すると決めた場合 | 後から友人になった uid に過去イベントを公開せず、Discord ID を UID と混同しない |
 | PX-03 | P1-04 | TODO | アプリ内友人のコメントを `timeline` に追加する（Discord モーダル返信の保存は P0-19 で実装済み） | PX-02 と P2-02 | アプリ内友人がコメントできる |
@@ -126,8 +137,11 @@ MVP 主線（P0-01〜P0-21）は完了し `mvp-0.1` として保全済み。こ�
 
 1. ~~**P1-16**: アプリ内チャット風ライブ表示~~ **完了（2026-09-26 15:08、実通話で確認済み）**。
 2. ~~**P1-17**: 英語化・B2C 向け UI 整形~~ **完了（2026-09-26 15:30、3 タブ化・テーマ適用・全文英語化）**。
-3. **P2-01/P2-02 → P2-07（次の着手）**: P2 最小書き込みパスを通してから周辺情報蓄積（`ambient_observation`）。
-4. **P1-18 → P1-19**: World ID 再認証・解除、Passport/Selfie 対応。
-5. P3（失敗系・長時間ロック）はこの後。PX（アプリ内友人リンク、GATT）は時間が余った場合のみ。
+3. **P2-08 〜 P2-11（次の着手）**: 周辺音の取り込み。まずマイク権限を事前設定として用意し、
+   次に「画面 OFF・ロック中に本当に録れるのか」を実機で確かめる（`reference/ambient-verification.md`）。
+4. 並行して、実端末で縦断フローを何度も回して MVP を堅牢化する。壊れたものをその場で直し、
+   見つかった問題をタスクとして本ファイルへ追加する。
+5. P1-18 → P1-19（World ID 再認証・解除、Passport/Selfie 対応）。
+6. PX（状況ストア、異常系の網羅、アプリ内友人リンク、GATT）は時間が余った場合のみ。
 
 リファクタリング時は `reference/mvp0.1.md` の「既知の制約」、特に `maxScale=1` 前提に注意する。
