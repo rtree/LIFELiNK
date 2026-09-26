@@ -34,7 +34,16 @@ API・データ構造を見直す前に、まず対応すべきユースケー�
 
 上記の不足点のうち物理ボタンのアカウント紐付けと `accuracy_m` は次回の API・データ設計で検討する。アプリ内友人リンクの二本立て化は将来の再評価事項であり、今回の Discord スキーマを待たせない。
 
-## 2. ハッカソン MVP の成功条件
+8. **通話・状況のライブ表示（自分のアプリ内、2026-09-26 追加）**: Discord DM への逐次中継（4a 章）とは別に、LIFELiNK アプリ自身にも通話の書き起こしと友人からの情報をチャット風（Discord チャンネル/WhatsApp 的な見た目、uimock のテイストに近い方を採用）に表示する。
+   - **対応方針（2026-09-26 決定）**: 新規スキーマは不要。既存の `emergency_events/{id}/updates`（`type: note|location|transcript_contact|transcript_ai|friend_comment|system`）をそのまま時系列チャットとして Android から購読表示する。P2（`emergencySessions`/`timeline`）への移行を待たずに実装してよい（3 章の「モックを作らず本物のスキーマへ」原則に従い、購読先は本物の `emergency_events` のみ）。P2 移行後は購読先を `timeline` に切り替えるが、UI のメッセージ整形ロジック自体は流用できるよう設計する。
+9. **周辺のスピーカー・カメラによる状況蓄積（2026-09-26 追加）**: 可能な場合、周辺の音声・映像から状況を解析し、状況ストアへ蓄積して AI が通話相手や Discord の友人からの質問に答えられるようにする。
+   - **対応方針（2026-09-26 決定）**: 8a 章の `facts.kind: ambient_observation`（`value: { text, provider }`）が既にこの用途で設計済み。生の音声・画像データそのものは保存・送信せず、端末または backend で解析した後のテキスト要約だけを fact として保存する（12 章の「音声を録音しない」方針と両立する）。P2 の最小書き込みパス（P2-01/02）が前提になるため、着手は P2 実装後。
+10. **World ID の再認証・認証解除・Passport/Selfie 対応（2026-09-26 追加）**: 認証が切れたら設定画面から再認証でき、認証そのものを解除する操作もできる。Proof of Human に加えて Passport や Selfie Check にも対応する。
+    - **対応方針（2026-09-26 決定）**: IDKit 側は `credential_types` ポリシーに `passport`/`face` 等を追加するだけで対応できる（SDK は既に対応済み）。`human_verified` custom claim の付け外しは 5 章・8a 章の 2 段階認可モデル（Google → World ID）をそのまま使い、`backend/src/worldid.ts`（Discord 実装が触っている `server.ts`/`config.ts`/`discord.ts` とは別ファイル）に再認証・解除用の小さい API を足すだけで済む。設定画面（モック 1-6 相当）を新設する。着手は⑧⑨の後（次段落の実行順序を参照）。
+
+**2026-09-26 実行順序の決定（人間確認済み、残り時間の目安 10 時間）**: ⑧チャット UI（`emergency_events` のまま） → 英語化/B2C 向け UI 整形（一括フェーズにせず、以後触る画面から段階的に英語化する） → ⑨周辺情報蓄積（P2 前提） → ⑩ World ID 再認証/解除/Passport・Selfie。
+
+
 
 実 Android 端末と同意済みの Discord 実アカウントで次の縦断フローが一度以上成功し、証跡を残せることを **Discord を含む MVP 主線** の完了条件とする。1〜9 の電話/iBeacon 発信、双方向通話、通話中メモの happy path は確認済み（位置更新の実通話確認は別途）。10〜12 は未実装・未検証であり、P0-15 の DONE と MVP 全体の DONE を混同しない。
 

@@ -58,6 +58,14 @@ P0-15 は電話/iBeacon の **happy path** の通過点であり、製品全体�
 
 **2026-09-26 優先順位更新**: **P0-15 実機完了済み → Discord 個別 DM の主線（P0-16〜P0-20）→ P2 最小書き込みパス（P2-01/P2-02）→ Full UI と delegations を並行**。Discord 検証は既存の本物の `emergency_events`/`updates` を使い、P2 の完成を待たず、モックも作らない。P2 スキーマ変更時はコードより先に `doc/plan.md` を更新。Discord が相手の同意や DM 配信条件で詰まれば実測した失敗を記録し、電話+iBeacon の動く主線を守る。
 
+**2026-09-26 追加（人間確認済み、残り時間目安 10 時間）**: MVP 0.1（`mvp-0.1` タグ、`reference/mvp0.1.md`）到達後の次の実行順は **P1-16（チャット UI）→ 英語化/B2C UI 整形（以後触る画面から段階的に、専用タスクは立てない）→ P2-07（周辺情報蓄積、P2 完了後）→ P1-17/P1-18（World ID 再認証・解除・Passport/Selfie）**。
+
+| ID | 状態 | タスク | 依存 | 完了条件 |
+| --- | --- | --- | --- | --- |
+| P1-16 | TODO | Android に緊急イベントのチャット風ライブ表示画面を実装する。`emergency_events/{id}/updates` を時系列購読し、`note`/`location`/`transcript_contact`/`transcript_ai`/`friend_comment`/`system` を種類ごとに整形して表示する（Discord チャンネル風または WhatsApp 風、uimock のテイストに近い方を採用） | P0-20（Discord 縦断確認済み） | 実際の緊急イベントで、通話の書き起こしと Discord 友人からの返信が届いた順にアプリ内へ表示される。ダミーデータは使わない。P2 移行後に購読先を `timeline` へ切り替えられるよう整形ロジックをデータ源から分離する |
+| P1-17 | TODO | World ID の再認証・認証解除の設定画面と API を実装する（`backend/src/worldid.ts` に追加、`server.ts`/`config.ts`/`discord.ts` には触れない） | P1-16、Discord 主線が一段落していること | 認証切れ・失効後に設定画面から再認証でき、認証解除操作で `human_verified` claim が外れて緊急発信が再びブロックされることを実機で確認する |
+| P1-18 | TODO | IDKit の `credential_types` に Passport/Selfie Check を追加する | P1-17 | Proof of Human に加えて Passport または Selfie Check でも認証が成立し、`human_verified` claim が同様に付与される |
+
 | ID | 状態 | タスク | 依存 | 完了条件 |
 | --- | --- | --- | --- | --- |
 | P1-01 | TODO | 通話録音/書き起こし共有の可否を別途決める。アプリ同士の友人リンクは将来の任意機能に延期済み | P0-20、同意/保持期間の判断 | 録音の有無・公開範囲を `doc/plan.md` に記録。Discord DM の実装を妨げない |
@@ -90,6 +98,7 @@ P0-15 は電話/iBeacon の **happy path** の通過点であり、製品全体�
 | P2-04 | TODO | `delegationStore.ts` + `responsesDelegate.ts`: `delegate_investigation` の非同期委譲（`background: true`、poll、`call_id` 冪等化）を実装する | P2-03 | 保留発話が一回だけ発話され、Responses 完了後に同じ通話へ結果が音声で返る |
 | P2-05 | TODO | `realtimeBridge.ts`: 既存 `voice.ts` の Media Stream bridge を tool event 処理・OOB 保留・結果注入・truncation 込みで発展させる | P2-01〜P2-04 | 通話終了後の delegation 結果は音声注入されず履歴のみに保存される |
 | P2-06 | TODO | 認可・rate limit・ログ非記録の横断実装（8a 章「認可・安全」）と障害時のフォールバック文言を実装する | P2-01〜P2-05 | stale/unknown/timeout/failure を捏造せず明示し、重複 event/tool call/delegation で二重発話・二重発信しない |
+| P2-07 | TODO | 周辺のスピーカー・カメラから解析したテキスト要約を `facts.kind: ambient_observation` として保存する取り込みパスを実装する（生の音声・画像データは保存・送信しない） | P2-01、同意・法務判断 | 明示同意のもとで解析済みテキストが fact として保存され、通話中の AI と Discord 経由の質問応答に使える。生データはどこにも永続化されない |
 
 ## P3: 異常系・堅牢化（後回し、2026-09-26 人間判断）
 
