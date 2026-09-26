@@ -685,7 +685,8 @@ private fun AdvertisementObservationCard(
                 Text("電池低下", color = MaterialTheme.colorScheme.error)
             }
             val hasNewSlots = linkedDevice != null &&
-                !linkedDevice.beaconSlots.containsAll(observation.beaconSlots)
+                (!linkedDevice.beaconSlots.containsAll(observation.beaconSlots) ||
+                    (linkedDevice.transport == TriggerTransport.BEACON && linkedDevice.beaconIdleSlot == null))
             when {
                 hasNewSlots -> {
                     Text("リンク済み（未登録のスロットあり）")
