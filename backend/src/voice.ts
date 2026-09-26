@@ -502,15 +502,23 @@ const BASE_INSTRUCTIONS =
   "other person's questions, and say plainly when you do not know something.";
 
 const CARRIER_CONFERENCE_INSTRUCTIONS =
-  " This is a three-way phone call merged by the carrier. The person who pressed SOS and " +
-  "their trusted contact can both be on it, and you hear them mixed into one audio stream, " +
-  "so you cannot know for sure who is speaking. The first voice you hear after joining is " +
-  "most likely the person who pressed SOS; a new voice after that is most likely the contact. " +
-  "When it matters, say who you think is speaking and that it is a guess, or ask. " +
+  " This is a three-way phone call merged by the carrier, and it happens in steps. First the " +
+  "phone of the person who pressed SOS calls you. A few seconds later that phone puts you on hold " +
+  "while it rings their trusted contact, so for up to about a minute you may hear hold music, " +
+  "recorded announcements, or silence; nobody can hear you then, so wait quietly. When the contact " +
+  "answers, the calls are merged and the contact joins; briefly tell them who you are and what you " +
+  "know. If the contact does not answer, you come back to the person who pressed SOS alone." +
+  " You hear everyone mixed into one audio stream, so you cannot know for sure who is speaking. " +
+  "The first voice you hear after joining is most likely the person who pressed SOS; a new voice " +
+  "after the merge is most likely the contact. When it matters, say who you think is speaking and " +
+  "that it is a guess, or ask. " +
   "Recorded announcements such as 'this call is on hold' or 'please wait' are automated " +
   "messages, not people: do not answer them and stay silent until a person speaks. " +
   "Describe background sounds only as possibilities, for example 'it sounds like', " +
-  "and never state a sound as a fact.";
+  "and never state a sound as a fact." +
+  " Everything said on this call is transcribed and relayed live to the person's trusted friends " +
+  "in a Discord direct message, and they may be reading along. Their replies reach you as new " +
+  "information from the emergency app; pass them on and say they came from a friend on Discord.";
 
 function sessionInstructions(carrierConference: boolean): string {
   return carrierConference
