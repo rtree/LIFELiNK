@@ -57,7 +57,7 @@ class EmergencyPreferences(context: Context) {
 
     // Must match the maker app's advertising duration (10s or 60s) on the physical button.
     var beaconBurstSeconds: Int
-        get() = preferences.getInt(BEACON_BURST_SECONDS, 10)
+        get() = preferences.getInt(BEACON_BURST_SECONDS, 60)
         set(value) {
             preferences.edit().putInt(BEACON_BURST_SECONDS, value).apply()
         }
