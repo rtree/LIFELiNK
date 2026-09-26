@@ -1,19 +1,30 @@
 package com.rtree.LIFELiNK
 
+import android.app.KeyguardManager
 import android.bluetooth.le.ScanResult
+import android.content.Context
+import android.os.PowerManager
+import android.os.SystemClock
+import android.util.Log
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 enum class AdvertisementKind(val label: String) {
-    IBEACON("iBeacon"),
-    GATT_SERVICE("GATT Service"),
-    MANUFACTURER("Manufacturer"),
-    OTHER("Other"),
+    IBEACON("iBeacon（＋Beacon ボタン候補）"),
+    GATT_SERVICE("GATT（XIAO nRF52840）"),
 }
 
 enum class TriggerTransport(val label: String) {
     BEACON("Beacon"),
     GATT("GATT"),
+}
+
+data class BeaconSlot(
+    val uuid: String,
+    val major: Int,
+    val minor: Int,
+) {
+    val label: String get() = "$uuid / $major / $minor"
 }
 
 data class AdvertisementObservation(
@@ -26,9 +37,8 @@ data class AdvertisementObservation(
     val seenCount: Int,
     val suggestedTransport: TriggerTransport?,
     val deviceAddress: String?,
-    val beaconUuid: String? = null,
-    val beaconMajor: Int? = null,
-    val beaconMinor: Int? = null,
+    val beaconSlot: BeaconSlot? = null,
+    val beaconSlots: List<BeaconSlot> = emptyList(),
     val beaconBatteryLow: Boolean? = null,
     val beaconLongPress: Boolean? = null,
     val gattServiceUuid: String? = null,
@@ -41,7 +51,9 @@ data class IBeaconIdentity(
     val minor: Int,
     val batteryLow: Boolean,
     val longPress: Boolean,
-)
+) {
+    val slot: BeaconSlot get() = BeaconSlot(uuid, major, minor)
+}
 
 data class BeaconLogEntry(
     val atMillis: Long,
@@ -50,17 +62,20 @@ data class BeaconLogEntry(
 
 object AdvertisementRegistry {
     private const val APPLE_COMPANY_ID = 0x004c
-    private const val MAX_LOG_ENTRIES = 100
+    private const val MAX_LOG_ENTRIES = 300
+    private const val LOG_TAG = "LIFELiNK.BeaconLog"
+    const val XIAO_MODEL_INFO = "Seeed XIAO nRF52840 / FCC ID Z4T-XIAONRF52840 / 技適 211-220207"
 
     private val mutableObservations = MutableStateFlow<List<AdvertisementObservation>>(emptyList())
     val observations = mutableObservations.asStateFlow()
 
     private val mutableBeaconLog = MutableStateFlow<List<BeaconLogEntry>>(emptyList())
     val beaconLog = mutableBeaconLog.asStateFlow()
-    private val lastIBeaconIdentityByAddress = mutableMapOf<String, String>()
+    private val lastIBeaconStateByAddress = mutableMapOf<String, String>()
 
     @Synchronized
     fun appendBeaconLog(text: String, atMillis: Long = System.currentTimeMillis()) {
+        Log.i(LOG_TAG, text)
         mutableBeaconLog.value = (listOf(BeaconLogEntry(atMillis, text)) + mutableBeaconLog.value)
             .take(MAX_LOG_ENTRIES)
     }
@@ -68,16 +83,34 @@ object AdvertisementRegistry {
     @Synchronized
     fun clearBeaconLog() {
         mutableBeaconLog.value = emptyList()
-        lastIBeaconIdentityByAddress.clear()
+        lastIBeaconStateByAddress.clear()
+    }
+
+    fun packetWallMillis(result: ScanResult): Long =
+        System.currentTimeMillis() - (SystemClock.elapsedRealtimeNanos() - result.timestampNanos) / 1_000_000
+
+    fun packetAgeMillis(result: ScanResult): Long =
+        (SystemClock.elapsedRealtimeNanos() - result.timestampNanos) / 1_000_000
+
+    fun deviceLabel(address: String?): String = address?.takeLast(5)?.replace(":", "") ?: "----"
+
+    fun screenState(context: Context): String {
+        val interactive = context.getSystemService(PowerManager::class.java)?.isInteractive
+        val locked = context.getSystemService(KeyguardManager::class.java)?.isKeyguardLocked
+        return "画面=${if (interactive == true) "ON" else "OFF"} ロック=${if (locked == true) "中" else "解除"}"
     }
 
     @Synchronized
-    fun observe(result: ScanResult): AdvertisementObservation {
+    fun observe(context: Context, result: ScanResult): AdvertisementObservation? {
         val now = System.currentTimeMillis()
-        val parsed = parse(result, now)
+        val parsed = parse(result, now) ?: return null
         val previous = mutableObservations.value.firstOrNull { it.key == parsed.key }
-        val updated = parsed.copy(seenCount = (previous?.seenCount ?: 0) + 1)
-        recordIBeaconTransition(updated, now)
+        val slots = (previous?.beaconSlots.orEmpty() + listOfNotNull(parsed.beaconSlot)).distinct()
+        val updated = parsed.copy(
+            seenCount = (previous?.seenCount ?: 0) + 1,
+            beaconSlots = slots,
+        )
+        recordIBeaconTransition(context, result, updated)
         mutableObservations.value = (mutableObservations.value.filterNot { it.key == updated.key } + updated)
             .sortedWith(
                 compareBy<AdvertisementObservation, String>(String.CASE_INSENSITIVE_ORDER) { it.title }
@@ -86,54 +119,60 @@ object AdvertisementRegistry {
         return updated
     }
 
-    // Records identity changes per physical address so button operations can be mapped to UUID/Major/Minor states.
-    private fun recordIBeaconTransition(observation: AdvertisementObservation, now: Long) {
-        if (observation.kind != AdvertisementKind.IBEACON) return
+    // Records state changes per physical address so button operations can be mapped to slots and timed.
+    private fun recordIBeaconTransition(
+        context: Context,
+        result: ScanResult,
+        observation: AdvertisementObservation,
+    ) {
+        val slot = observation.beaconSlot ?: return
         val address = observation.deviceAddress ?: return
-        val identity = "${observation.beaconUuid} / ${observation.beaconMajor} / ${observation.beaconMinor}" +
+        val state = slot.label +
             (if (observation.beaconLongPress == true) " (長押し)" else "") +
             if (observation.beaconBatteryLow == true) " (電池低下)" else ""
-        val previous = lastIBeaconIdentityByAddress.put(address, identity)
-        if (previous == identity) return
-        val label = address.takeLast(5).replace(":", "")
+        val previous = lastIBeaconStateByAddress.put(address, state)
+        if (previous == state) return
+        val timing = "pkt=${formatLogTime(packetWallMillis(result))} " +
+            "遅延=${packetAgeMillis(result)}ms RSSI=${result.rssi} ${screenState(context)}"
         appendBeaconLog(
-            if (previous == null) "[$label] 初回: $identity" else "[$label] 変化: $previous → $identity",
-            now,
+            if (previous == null) {
+                "[${deviceLabel(address)}] 初回: $state / $timing"
+            } else {
+                "[${deviceLabel(address)}] 変化: $previous → $state / $timing"
+            },
         )
     }
 
-    private fun parse(result: ScanResult, now: Long): AdvertisementObservation {
-        val record = result.scanRecord
+    private fun parse(result: ScanResult, now: Long): AdvertisementObservation? {
+        val record = result.scanRecord ?: return null
         val deviceAddress = runCatching { result.device.address }.getOrNull()
-        val deviceLabel = deviceAddress?.takeLast(5)?.replace(":", "")?.let { " • $it" }.orEmpty()
-        val appleData = record?.getManufacturerSpecificData(APPLE_COMPANY_ID)
-        val iBeacon = appleData?.let(::parseIBeacon)
+        val label = deviceLabel(deviceAddress)
+        val iBeacon = parseIBeacon(result)
         if (iBeacon != null) {
             return AdvertisementObservation(
-                key = "ibeacon:${iBeacon.uuid}:${iBeacon.major}:${iBeacon.minor}:${deviceAddress.orEmpty()}",
+                key = "ibeacon:${deviceAddress.orEmpty()}",
                 kind = AdvertisementKind.IBEACON,
-                title = "iBeacon ${iBeacon.major} / ${iBeacon.minor}$deviceLabel",
-                detail = iBeacon.uuid,
+                title = "iBeacon • $label",
+                detail = "現在: ${iBeacon.slot.label}",
                 rssi = result.rssi,
                 lastSeenAtMillis = now,
                 seenCount = 0,
                 suggestedTransport = TriggerTransport.BEACON,
                 deviceAddress = deviceAddress,
-                beaconUuid = iBeacon.uuid,
-                beaconMajor = iBeacon.major,
-                beaconMinor = iBeacon.minor,
+                beaconSlot = iBeacon.slot,
                 beaconBatteryLow = iBeacon.batteryLow,
                 beaconLongPress = iBeacon.longPress,
             )
         }
 
-        val serviceUuid = record?.serviceUuids?.firstOrNull()?.uuid?.toString()?.uppercase()
-        if (serviceUuid != null) {
+        val name = record.deviceName.orEmpty()
+        if (XIAO_NAME_MARKERS.any { name.contains(it, ignoreCase = true) }) {
+            val serviceUuid = record.serviceUuids?.firstOrNull()?.uuid?.toString()?.uppercase()
             return AdvertisementObservation(
-                key = "service:$serviceUuid:${deviceAddress.orEmpty()}",
+                key = "gatt:${deviceAddress.orEmpty()}",
                 kind = AdvertisementKind.GATT_SERVICE,
-                title = record.deviceName?.takeIf(String::isNotBlank) ?: "GATT device",
-                detail = serviceUuid,
+                title = "$name • $label",
+                detail = "$XIAO_MODEL_INFO\nService: ${serviceUuid ?: "未広告"}",
                 rssi = result.rssi,
                 lastSeenAtMillis = now,
                 seenCount = 0,
@@ -142,35 +181,7 @@ object AdvertisementRegistry {
                 gattServiceUuid = serviceUuid,
             )
         }
-
-        val manufacturerData = record?.manufacturerSpecificData
-        if (manufacturerData != null && manufacturerData.size() > 0) {
-            val companyId = manufacturerData.keyAt(0)
-            return AdvertisementObservation(
-                key = "manufacturer:$companyId:${record.deviceName.orEmpty()}:${deviceAddress.orEmpty()}",
-                kind = AdvertisementKind.MANUFACTURER,
-                title = record.deviceName?.takeIf(String::isNotBlank) ?: "Manufacturer advertisement",
-                detail = "Company ID 0x%04X".format(companyId),
-                rssi = result.rssi,
-                lastSeenAtMillis = now,
-                seenCount = 0,
-                suggestedTransport = null,
-                deviceAddress = deviceAddress,
-            )
-        }
-
-        val name = record?.deviceName?.takeIf(String::isNotBlank) ?: "Unknown advertisement"
-        return AdvertisementObservation(
-            key = "other:$name:${deviceAddress.orEmpty()}",
-            kind = AdvertisementKind.OTHER,
-            title = name,
-            detail = "No linkable Beacon or GATT identity",
-            rssi = result.rssi,
-            lastSeenAtMillis = now,
-            seenCount = 0,
-            suggestedTransport = null,
-            deviceAddress = deviceAddress,
-        )
+        return null
     }
 
     fun parseIBeacon(result: ScanResult): IBeaconIdentity? =
@@ -196,4 +207,13 @@ object AdvertisementRegistry {
             longPress = rawMajor and 0x4000 != 0,
         )
     }
+
+    private val XIAO_NAME_MARKERS = listOf("XIAO", "LIFELiNK")
 }
+
+val LOG_TIME_FORMATTER: java.time.format.DateTimeFormatter =
+    java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss.SSS")
+        .withZone(java.time.ZoneId.systemDefault())
+
+fun formatLogTime(epochMillis: Long): String =
+    LOG_TIME_FORMATTER.format(java.time.Instant.ofEpochMilli(epochMillis))

@@ -45,17 +45,26 @@ object BeaconTriggerManager {
             .adapter
             ?.bluetoothLeScanner
             ?: error("Bluetooth scanner is unavailable")
-        val result = scanner.startScan(
-            buildFilters(context),
-            ScanSettings.Builder()
-                .setScanMode(ScanSettings.SCAN_MODE_LOW_POWER)
-                .setCallbackType(ScanSettings.CALLBACK_TYPE_ALL_MATCHES)
-                .build(),
-            pendingIntent(context),
-        )
+        val filters = buildFilters(context)
+        if (filters.isNotEmpty()) {
+            val result = scanner.startScan(
+                filters,
+                ScanSettings.Builder()
+                    .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+                    .setCallbackType(ScanSettings.CALLBACK_TYPE_ALL_MATCHES)
+                    .build(),
+                pendingIntent(context),
+            )
+            AdvertisementRegistry.appendBeaconLog(
+                "スキャン開始: PendingIntent LOW_LATENCY filter=${filters.size} result=$result " +
+                    "リンクスロット=${linkedSlots(context).joinToString { it.label }}",
+            )
+        } else {
+            scanner.stopScan(pendingIntent(context))
+            AdvertisementRegistry.appendBeaconLog("スキャン開始: リンク済みBeaconが無いため発信トリガーは無効（観測のみ）")
+        }
         startForegroundCallback(context, scanner)
-        Log.i("LIFELiNK.Beacon", "Beacon scans started with result=$result")
-        return result
+        return filters.size
     }
 
     fun stop(context: Context) {
@@ -76,12 +85,12 @@ object BeaconTriggerManager {
         foregroundCallback?.let(scanner::stopScan)
         val callback = object : ScanCallback() {
             override fun onScanResult(callbackType: Int, result: ScanResult) {
-                AdvertisementRegistry.observe(result)
+                AdvertisementRegistry.observe(context, result)
                 if (!isTriggerAdvertisement(context, result)) return
-                Log.i("LIFELiNK.Beacon", "Foreground long-press Beacon match received")
                 context.sendBroadcast(
                     Intent(context, BeaconReceiver::class.java)
                         .setAction(ACTION_BEACON_RESULT)
+                        .putExtra(EXTRA_PATH, PATH_FOREGROUND)
                         .putParcelableArrayListExtra(
                             BluetoothLeScanner.EXTRA_LIST_SCAN_RESULT,
                             arrayListOf(result),
@@ -90,7 +99,7 @@ object BeaconTriggerManager {
             }
 
             override fun onScanFailed(errorCode: Int) {
-                Log.e("LIFELiNK.Beacon", "Foreground Beacon scan failed: $errorCode")
+                AdvertisementRegistry.appendBeaconLog("前面スキャン失敗: errorCode=$errorCode")
             }
         }
         foregroundScanner = scanner
@@ -104,66 +113,9 @@ object BeaconTriggerManager {
         )
     }
 
-    fun diagnoseNextIBeacon(
-        context: Context,
-        onResult: (String) -> Unit,
-    ) {
-        check(BuildConfig.DEBUG) { "Beacon diagnostics are debug-only" }
-        check(hasPermission(context)) { "Bluetooth scan permission is required" }
-        val scanner = context.getSystemService(BluetoothManager::class.java)
-            .adapter
-            ?.bluetoothLeScanner
-            ?: error("Bluetooth scanner is unavailable")
-        val callback = object : ScanCallback() {
-            override fun onScanResult(callbackType: Int, result: ScanResult) {
-                val data = result.scanRecord
-                    ?.getManufacturerSpecificData(APPLE_COMPANY_ID)
-                    ?: return
-                val identity = parseIBeaconIdentity(data) ?: return
-                scanner.stopScan(this)
-                Log.i("LIFELiNK.Beacon", "Observed iBeacon identity: $identity")
-                onResult(identity)
-            }
-        }
-        scanner.startScan(
-            listOf(
-                ScanFilter.Builder()
-                    .setManufacturerData(
-                        APPLE_COMPANY_ID,
-                        byteArrayOf(0x02, 0x15),
-                        byteArrayOf(0xff.toByte(), 0xff.toByte()),
-                    )
-                    .build(),
-            ),
-            ScanSettings.Builder()
-                .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
-                .build(),
-            callback,
-        )
-    }
-
-    private fun buildFilters(context: Context): List<ScanFilter> {
-        val linkedAddress = linkedBeaconAddress(context)
-        if (linkedAddress != null) {
-            // Any slot of the linked device, as long as the long-press bit is set.
-            val data = ByteArray(22).also {
-                it[0] = 0x02
-                it[1] = 0x15
-                it[18] = 0x40
-            }
-            val mask = ByteArray(22).also {
-                it[0] = 0xff.toByte()
-                it[1] = 0xff.toByte()
-                it[18] = 0x40
-            }
-            return listOf(
-                ScanFilter.Builder()
-                    .setDeviceAddress(linkedAddress)
-                    .setManufacturerData(APPLE_COMPANY_ID, data, mask)
-                    .build(),
-            )
-        }
-        return DEFAULT_TRIGGER_SLOTS.map { slot ->
+    // Each linked slot matches only when Major bit14 (long press) is set; bit15 (battery low) is ignored.
+    private fun buildFilters(context: Context): List<ScanFilter> =
+        linkedSlots(context).map { slot ->
             val major = slot.major or 0x4000
             val data = byteArrayOf(0x02, 0x15) +
                 uuidBytes(slot.uuid) +
@@ -178,23 +130,16 @@ object BeaconTriggerManager {
                 .setManufacturerData(APPLE_COMPANY_ID, data, mask)
                 .build()
         }
-    }
 
-    private fun linkedBeaconAddress(context: Context): String? =
+    private fun linkedSlots(context: Context): List<BeaconSlot> =
         EmergencyPreferences(context).linkedTriggerDevice
             ?.takeIf { it.transport == TriggerTransport.BEACON }
-            ?.deviceAddress
+            ?.beaconSlots
+            .orEmpty()
 
     fun isTriggerAdvertisement(context: Context, result: ScanResult): Boolean {
         val identity = AdvertisementRegistry.parseIBeacon(result) ?: return false
-        if (!identity.longPress) return false
-        val linkedAddress = linkedBeaconAddress(context)
-        if (linkedAddress != null) {
-            return runCatching { result.device.address }.getOrNull() == linkedAddress
-        }
-        return DEFAULT_TRIGGER_SLOTS.any { slot ->
-            slot.uuid == identity.uuid && slot.major == identity.major && slot.minor == identity.minor
-        }
+        return identity.longPress && identity.slot in linkedSlots(context)
     }
 
     private fun pendingIntent(context: Context): PendingIntent = PendingIntent.getBroadcast(
@@ -210,67 +155,65 @@ object BeaconTriggerManager {
         .map { it.toInt(16).toByte() }
         .toByteArray()
 
-    private fun parseIBeaconIdentity(data: ByteArray): String? {
-        if (data.size < 22 || data[0] != 0x02.toByte() || data[1] != 0x15.toByte()) {
-            return null
-        }
-        val uuidHex = data.copyOfRange(2, 18).joinToString("") { byte ->
-            "%02X".format(byte.toInt() and 0xff)
-        }
-        val uuid = "${uuidHex.substring(0, 8)}-${uuidHex.substring(8, 12)}-" +
-            "${uuidHex.substring(12, 16)}-${uuidHex.substring(16, 20)}-" +
-            uuidHex.substring(20)
-        val major = ((data[18].toInt() and 0xff) shl 8) or (data[19].toInt() and 0xff)
-        val minor = ((data[20].toInt() and 0xff) shl 8) or (data[21].toInt() and 0xff)
-        return "$uuid / $major / $minor"
-    }
-
-    private data class TriggerSlot(val uuid: String, val major: Int, val minor: Int)
-
+    const val EXTRA_PATH = "com.rtree.LIFELiNK.BEACON_PATH"
+    const val PATH_FOREGROUND = "foreground"
+    const val PATH_PENDING_INTENT = "pending_intent"
     private const val APPLE_COMPANY_ID = 0x004c
-
-    // Beacon0 (BB192440-.../11665/31295) is the idle advertisement and must never trigger.
-    private val DEFAULT_TRIGGER_SLOTS = listOf(
-        TriggerSlot("581E31D6-E7BA-407A-B12E-949ACE475485", 7290, 36652),
-        TriggerSlot("AA82CE42-BFC7-4182-B760-1CCA10116876", 12975, 16823),
-    )
 }
 
 class BeaconReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != BeaconTriggerManager.ACTION_BEACON_RESULT) return
-        val nowNanos = SystemClock.elapsedRealtimeNanos()
-        val results = scanResults(intent)
-            .filter { nowNanos - it.timestampNanos <= MAX_ADVERTISEMENT_AGE_NANOS }
+        val path = intent.getStringExtra(BeaconTriggerManager.EXTRA_PATH)
+            ?: BeaconTriggerManager.PATH_PENDING_INTENT
+        val matched = scanResults(intent)
             .filter { BeaconTriggerManager.isTriggerAdvertisement(context, it) }
-        if (results.isEmpty()) return
-        Log.i(LOG_TAG, "Long-press Beacon advertisement received")
+        if (matched.isEmpty()) return
+        val fresh = matched.filter {
+            AdvertisementRegistry.packetAgeMillis(it) <= MAX_ADVERTISEMENT_AGE_MS
+        }
+        if (fresh.isEmpty()) {
+            AdvertisementRegistry.appendBeaconLog(
+                "長押し破棄(古い) [$path] 最新遅延=${matched.minOf(AdvertisementRegistry::packetAgeMillis)}ms " +
+                    "件数=${matched.size} ${AdvertisementRegistry.screenState(context)}",
+            )
+            return
+        }
+        val packet = fresh.maxBy { it.timestampNanos }
+        Log.i(
+            LOG_TAG,
+            "long-press pkt path=$path age=${AdvertisementRegistry.packetAgeMillis(packet)}ms rssi=${packet.rssi}",
+        )
 
         val pendingResult = goAsync()
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             try {
-                dispatchBeacon(context.applicationContext)
+                dispatchBeacon(context.applicationContext, path, packet)
             } finally {
                 pendingResult.finish()
             }
         }
     }
 
-    private suspend fun dispatchBeacon(context: Context) {
+    private suspend fun dispatchBeacon(context: Context, path: String, packet: ScanResult) {
         val safetyGate = EmergencySafetyGate(context)
-        if (!safetyGate.acceptBeaconBurst()) {
-            Log.i(LOG_TAG, "Ignored duplicate Beacon advertisement burst")
-            return
-        }
+        if (!safetyGate.acceptBeaconBurst()) return
+        val packetAt = AdvertisementRegistry.packetWallMillis(packet)
+        val identity = AdvertisementRegistry.parseIBeacon(packet)
+        AdvertisementRegistry.appendBeaconLog(
+            "長押し受理 [$path] [${AdvertisementRegistry.deviceLabel(runCatching { packet.device.address }.getOrNull())}] " +
+                "${identity?.slot?.label} pkt=${formatLogTime(packetAt)} " +
+                "受信遅延=${AdvertisementRegistry.packetAgeMillis(packet)}ms RSSI=${packet.rssi} " +
+                AdvertisementRegistry.screenState(context),
+        )
         val preferences = EmergencyPreferences(context)
         if (preferences.beaconDryRun) {
-            Log.i(LOG_TAG, "Dry-run: linked Beacon burst accepted, emergency call skipped")
-            AdvertisementRegistry.appendBeaconLog("ドライラン: 長押しを検知（本番なら発信候補、発信せず）")
+            AdvertisementRegistry.appendBeaconLog("ドライラン: 発信せず（本番ならここでAPI送信）")
             return
         }
         val contactId = preferences.contactId
         if (contactId == null) {
-            Log.w(LOG_TAG, "Ignored Beacon because no emergency contact is registered")
+            AdvertisementRegistry.appendBeaconLog("発信中止: 緊急連絡先が未登録")
             return
         }
         val apiClient = LifeLinkApiClient()
@@ -281,13 +224,15 @@ class BeaconReceiver : BroadcastReceiver() {
                 apiClient.getEmergencyEvent(attempt.eventId)
             }.getOrNull()
             if (existing?.state !in TERMINAL_EVENT_STATES) {
-                Log.i(LOG_TAG, "Ignored Beacon while another emergency event is active")
+                AdvertisementRegistry.appendBeaconLog("発信中止: 進行中のイベントあり state=${existing?.state}")
                 return
             }
             safetyGate.clear(attempt.eventId)
             attempt = safetyGate.begin(contactId)
         }
 
+        val requestStartedAt = System.currentTimeMillis()
+        AdvertisementRegistry.appendBeaconLog("API送信開始 (押下パケットから${requestStartedAt - packetAt}ms)")
         runCatching {
             apiClient.createEmergencyEvent(
                 eventId = attempt.eventId,
@@ -297,13 +242,18 @@ class BeaconReceiver : BroadcastReceiver() {
                 initialNote = null,
             )
         }.onSuccess { result ->
-            Log.i(LOG_TAG, "Beacon emergency event accepted with state=${result.state}")
+            val now = System.currentTimeMillis()
+            AdvertisementRegistry.appendBeaconLog(
+                "API応答 state=${result.state} API所要=${now - requestStartedAt}ms 押下パケットから${now - packetAt}ms",
+            )
         }.onFailure { error ->
             if (error is ApiException && error.statusCode in 400..499) {
                 safetyGate.clear(attempt.eventId)
             }
             val errorCode = (error as? ApiException)?.errorCode ?: error::class.simpleName
-            Log.e(LOG_TAG, "Beacon emergency event failed: $errorCode")
+            AdvertisementRegistry.appendBeaconLog(
+                "API失敗 $errorCode API所要=${System.currentTimeMillis() - requestStartedAt}ms",
+            )
         }
     }
 
@@ -322,7 +272,7 @@ class BeaconReceiver : BroadcastReceiver() {
 
     private companion object {
         const val LOG_TAG = "LIFELiNK.Beacon"
-        const val MAX_ADVERTISEMENT_AGE_NANOS = 10_000_000_000L
+        const val MAX_ADVERTISEMENT_AGE_MS = 10_000L
         val TERMINAL_EVENT_STATES = setOf("completed", "failed")
     }
 }

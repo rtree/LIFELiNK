@@ -1,6 +1,7 @@
 package com.rtree.LIFELiNK
 
 import android.content.Context
+import org.json.JSONArray
 import org.json.JSONObject
 
 data class LinkedTriggerDevice(
@@ -9,9 +10,7 @@ data class LinkedTriggerDevice(
     val title: String,
     val detail: String,
     val deviceAddress: String?,
-    val beaconUuid: String?,
-    val beaconMajor: Int?,
-    val beaconMinor: Int?,
+    val beaconSlots: List<BeaconSlot>,
     val gattServiceUuid: String?,
 )
 
@@ -65,9 +64,12 @@ class EmergencyPreferences(context: Context) {
                     title = json.getString("title"),
                     detail = json.getString("detail"),
                     deviceAddress = json.optString("device_address").takeIf(String::isNotBlank),
-                    beaconUuid = json.optString("beacon_uuid").takeIf(String::isNotBlank),
-                    beaconMajor = json.optInt("beacon_major").takeIf { json.has("beacon_major") },
-                    beaconMinor = json.optInt("beacon_minor").takeIf { json.has("beacon_minor") },
+                    beaconSlots = json.optJSONArray("beacon_slots")?.let { slots ->
+                        (0 until slots.length()).map { index ->
+                            val slot = slots.getJSONObject(index)
+                            BeaconSlot(slot.getString("uuid"), slot.getInt("major"), slot.getInt("minor"))
+                        }
+                    }.orEmpty(),
                     gattServiceUuid = json.optString("gatt_service_uuid").takeIf(String::isNotBlank),
                 )
             }.getOrNull()
@@ -80,11 +82,17 @@ class EmergencyPreferences(context: Context) {
                     .put("title", device.title)
                     .put("detail", device.detail)
                     .put("device_address", device.deviceAddress.orEmpty())
-                    .put("beacon_uuid", device.beaconUuid.orEmpty())
-                    .apply {
-                        device.beaconMajor?.let { put("beacon_major", it) }
-                        device.beaconMinor?.let { put("beacon_minor", it) }
-                    }
+                    .put(
+                        "beacon_slots",
+                        JSONArray(
+                            device.beaconSlots.map { slot ->
+                                JSONObject()
+                                    .put("uuid", slot.uuid)
+                                    .put("major", slot.major)
+                                    .put("minor", slot.minor)
+                            },
+                        ),
+                    )
                     .put("gatt_service_uuid", device.gattServiceUuid.orEmpty())
                     .toString()
             }
@@ -99,9 +107,7 @@ class EmergencyPreferences(context: Context) {
             title = observation.title,
             detail = observation.detail,
             deviceAddress = observation.deviceAddress,
-            beaconUuid = observation.beaconUuid,
-            beaconMajor = observation.beaconMajor,
-            beaconMinor = observation.beaconMinor,
+            beaconSlots = observation.beaconSlots,
             gattServiceUuid = observation.gattServiceUuid,
         )
     }

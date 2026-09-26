@@ -8,31 +8,7 @@
 
 このアプリは公的な緊急通報の代替ではない。警察、消防、救急などの緊急番号へ自動発信するものではなく、ユーザーが指定した家族・友人などへの連絡を補助する。
 
-このプロダクトの核心は発信そのものだけではない。ボタン押下で AI が事前登録した相手に電話し、並行して同意済みの友人へ状況を知らせ、返信を緊急イベントの参考情報として受け取る。2026-09-26 に **Discord 個別 DM を友人共有の最初の縦断検証として採用**した。電話と iBeacon 長押しの実機検証を終えてから着手する。アプリ内の Google アカウント同士の友人リンク・共有 UI は **将来の任意機能** とし、ハッカソン提出と Discord フローの完成条件にはしない。友人全員が LIFELiNK をインストールすることは Discord 通知の条件にしない。
-
-## 1a. 主要ユースケース（ドメイン認識の共有、2026-09-26）
-
-API・データ構造を見直す前に、まず対応すべきユースケースを列挙して認識を揃える。各項目に、現状の設計での対応状況と、見つかった不足点を付記する。
-
-1. **物理ボタンの初期リンクと再登録**: 初期設定フェーズでユーザーが物理ボタン（Beacon または GATT）を自分のアカウントへリンクする。Beacon の場合は advertisement を検知し、自分が保有する個体の識別子（UUID/Major/Minor）を正確に登録する。GATT の場合はスキャン→接続→（必要なら bonding）→サービス探索という「ペアリングに相当する」手続きを行う。どちらも後から解除・再登録できる。
-  - **実装済み**: Android は周辺の iBeacon、GATT Service、Manufacturer、Other advertisement を種類別カードへ表示する。一度受信したカードはアプリプロセスのセッション中は削除せず、同じ個体の受信回数、RSSI、右上の最終受信時刻だけを更新する。カードは種類内で表示名の昇順に固定し、受信順による並び替えを行わないため、密集環境でも物理ボタンを選択できる。iBeacon はUUID/Major/Minorと端末内だけで使うBLEアドレス識別子、GATT候補はService UUIDを表示し、カードからリンク・解除できる。
-  - **残る不足**: 現在のリンク情報は端末ローカル保存であり、ユーザーアカウントへ同期するAPIとFirestoreスキーマは未実装。次回のAPI/データ実装では、選択済み個体を `users/{uid}` 配下の実ドキュメントへ保存し、再インストール時にも復元できるようにする。BeaconのBLEアドレスは端末内での識別補助に限定し、backendへ送らない。
-2. **通話相手からの質問への回答**: 通話相手が「今どこにいるんですか」「誰か状況を知っている人はいないんですか」と尋ねたとき、状況ストアから関連する事実を集めて回答する。
-   - **現状の対応**: 8a 章の `get_current_situation`/`get_session_history`/`delegate_investigation` で概ね対応済み。ただし「誰か知っている人はいないか」という質問は暗黙に `facts.kind: friend_reply` を探す動きを期待しているのに、Realtime への instructions にその探索対象が明示されていない。次回、instructions と `get_session_history` の `topic` enum に友人発言を明示的に含めるかを詰める。
-3. **状況ストアに蓄積する情報の範囲**: 緊急コールごとに、(a) 位置情報（デモのためデモ用途では都道府県レベルへ丸めた地名 + 精度 `accuracy_m` 自体は正確な値）、(b) Discord または LIFELiNK 間リンクを通じた友人からの情報、(c) 将来追加される情報プロバイダからの情報、(d) そもそも誰がプライマリユーザーで誰が友人ユーザーかが蓄積され、OpenAI Realtime がそれらを検索・取得して回答に使える。
-   - **現状の不足（訂正が必要）**: 直近のプライバシー方針変更（8 章）で `accuracy_m` も一律に破棄する実装にしてしまったが、本来 `accuracy_m`（GPS 精度のメートル数）自体は位置そのものを明かさない数値であり、破棄する理由がない。破棄すべきは緯度・経度と番地レベルの住所だけで、精度は状況ストアの `facts`/`state/current` に残してよい。次回の API/データ設計で `state/current.location` へ `accuracy_m` を復活させ、backend の `sanitizeLocationForPersistence()` も精度は保持するよう見直す。
-   - `facts.source.actor_id` はあるが、AI が「友人の太郎さんが〜と言っています」のように名前で回答するための表示名が正規化されていない。`source.actor_name` の追加を次回検討する。
-   - 「誰がプライマリユーザーで誰が友人か」は `emergencySessions.owner_uid`/`participant_uids` で表現済みで、追加の不足はない。
-4. **友人への通知経路**: 緊急コールが発生したとき、友人にも Discord またはアプリ内共有で連絡できる。
-  - **現状の対応**: Discord 個別 DM を電話/iBeacon 検証直後の最優先フローに決定。アプリ同士の共有も後続要件として残す（4a 章）。どちらもまだ実装済みではない。
-5. **認可レベルの 3 段階**: World ID の人間性証明が無くてもアプリは使える（ログイン・初期設定はできる）。ただし緊急発信には人間性証明が必須。そもそもアプリへログインするには Google アカウントが必須。
-   - **現状の対応**: 5 章・8a 章の設計、および `backend/src/auth.ts` の `authenticate`（Google のみ）と `requireHumanVerification`（Google + World ID）の 2 段階実装が、この 3 段階の認可レベルとちょうど一致している。追加の不足はない。
-6. **友人リンクは Discord を先行**: 通知先は Discord identity と明示同意で登録する。LIFELiNK アプリ同士の Google アカウントを使う相互リンクも将来は検討できる。
-  - **方針決定（2026-09-26 更新）**: `discordContacts` による個別 DM の縦断フローだけを先行実装する。`friend_links` や `link_type: lifelink | discord` の共通抽象化は必要になるまで実装しない。アプリ内の友人リンクは将来機能であり、Discord 成功後に必ず実装する約束ではない。Google メールアドレスの手入力だけで友人本人と判定しない。
-7. **UI は複数画面に分割する**: 1 画面に詰め込まず、uimock で共有した通り機能ごとに画面を分ける。これは初回登録だけでなく、後からの更新・再登録操作（1 の物理ボタン再登録、6 の友人解除など）のためにも重要。
-   - **現状の対応**: 4a 章の画面インベントリで既に多画面構成を採用済み。ただし「登録」画面はあっても「解除・再登録」の画面/操作が明示されていない箇所がある（友人解除、物理ボタン再登録）。次回の画面設計で登録系の全画面に対応する解除・編集導線を明示する。
-
-上記の不足点のうち物理ボタンのアカウント紐付けと `accuracy_m` は次回の API・データ設計で検討する。アプリ内友人リンクの二本立て化は将来の再評価事項であり、今回の Discord スキーマを待たせない。
+このプロダクトの核心は発信そのものだけではない。ボタンを押した瞬間から、(1) 通話相手との会話は AI が代理で行い、(2) その通話の様子（発話内容・位置・メモ）は事前に相互リンクした友人の同じアプリへ Discord 風のライブ画面としてリアルタイムに共有され、(3) それを見た友人がその場でコメントを書き込むと、backend が AI 経由でそのコメントを通話相手へ音声で伝える、という一連の体験が一体になっている。実通話 1 本を成立させる MVP 主線の実装順序は変えないが、この体験を後から作り直さずに済むよう、データ構造・画面遷移・OpenAI Realtime の使い方は本文書で先に確定させる。
 
 ## 2. ハッカソン MVP の成功条件
 
@@ -71,7 +47,7 @@ API・データ構造を見直す前に、まず対応すべきユースケー�
 
 以下はコード上の拡張点と設計判断を残すが、上記の実通話が成立するまで実装のために主線を止めない。
 
-- 友人共有（電話/iBeacon 実機検証後に Discord 個別 DM を最優先で検証。アプリ同士の共有 UI はその後）
+- 友人共有
 - Discord 風の通話・会話履歴
 - Android マイクからの周辺音声中継
 - GATT ボタンとロック中の常時反応
@@ -79,25 +55,6 @@ API・データ構造を見直す前に、まず対応すべきユースケー�
 - 通話録音、長期トランスクリプト保存
 
 上記は実装に着手する順序を後回しにするだけであり、データ構造・API 境界・画面遷移は主線と並行して本文書内（6 章「友人共有とライブフィードのデータモデル」、4 章「Discord 風 UI 画面遷移」、5 章の OpenAI Realtime 拡張）で先に確定する。主線実装者は、これらの設計に反しない範囲でフィールド名・コレクション構造を選ぶこと。
-
-### 主線完了後の実装順序（2026-09-26 確定）
-
-**2026-09-26 優先順位更新**: 電話の実通話に加え、Beacon0（待機広告）を発報として扱っていた修正後の iBeacon 長押しを実機で再検証する（P0-14a、P0-15）。**両方の完了後、Discord 個別連絡を他の P1/P2・GATT より先に縦断検証する。** Discord 側の準備を理由に電話/BLE の実機検証を延期しない。
-
-**基本原則: モックを作らず、常に本物のスキーマ・本物のデータに対して実装を積み重ねる。** UI を先に作るか backend を先に作るかという二択ではなく、「backend の充実度に関わらず、UI は最初から本物の Firestore コレクションだけを見る」を徹底する。この原則が守られていれば、backend の機能がどれだけ後から増えても UI コードは変更不要になり、「モックと実装済みの混乱」が構造的に起きない。8a 章「認可・安全」の読み書き経路の固定契約（Android は Firestore を直接 read、write は必ず backend API 経由）はこの原則を支える前提であり、以後変更しない。
-
-1. **P0-14a/P0-15: 電話と iBeacon の実機検証を完了する。** 短押し・待機広告では発信候補 0、長押し 1 回で発信 1 回、実通話と失敗時の二重発信防止を確認する。過去の Beacon0 由来の通話は長押し成功の証跡に数えない。
-2. **Discord 個別 DM の最小縦断フローを先に通す。** 実データの保存先（私的な招待/連絡先、イベントへの配送状態と返信）と API 契約を `doc/plan.md` で先に凍結し、本人確認付き招待→相手の明示同意→Bot テスト DM とボタン応答→実際の電話イベント発生時の DM→モーダル返信の保存まで、実際の Discord アカウントと Cloud Run/Firestore で検証する。既存の `emergency_events/{id}/updates` をこの **検証用の実イベント** の正本に用いることは可。ただし UI 用のダミーや一時 fixture は作らない。Bot の送信失敗・429・タイムアウトでも電話を止めず、二重 DM を抑える。
-3. **Discord 縦断フロー確認後、P2 の最小書き込みパスを実装する。** `emergencySessions`/`facts`/`state/current`/`timeline` への新規実イベントの保存を固め、Discord の返信も `friend_reply` fact と `friend_message` timeline に載せる。既存 `emergency_events` テストデータは移行しない。スキーマを変更する場合は必ず本書を先に修正する。
-4. **ここから Full UI と delegations 等を並行する。** Android は Firestore で本物の P2 コレクションを直接購読し、backend は同じスキーマへ書き込む。アプリ同士の Google 友人リンク・友人向け UI は将来の別判断とし、AI への第三者返信注入、GATT、録音も個別の後続作業とする。未実装画面はダミーを表示せず「準備中」と明示する。
-5. **残り時間のチェックポイント**: P0 が未検証なら Discord に進まない。Discord が受信者の同意または Bot の DM 到達条件で詰まれば実測した失敗を記録し、電話+iBeacon の動作するデモへ戻す。Discord の縦断フローが成立したら、その成果を維持した上で残り時間を Full UI・P2 に割く。
-
-**決定事項（2026-09-26、人間確認済み）**:
-
-- P2 は `delegations`（Responses delegation）を含むフルセットを最終的に実装するが、**着手順序は「最小の書き込みパス（facts/state/timeline）を先に固め、そこから UI と delegations 以降を並行で進める」**。全部を作り切ってから UI に着手する逐次実行はしない（判断過程は本節末尾の議論ログを参照）。
-- P0 の `emergency_events`/`updates` に既に入っている実機テストデータは**移行スクリプトを書かず**そのまま残す。P2 移行後は新規イベントだけが `emergencySessions` 系スキーマを使う。旧イベントは実機検証の履歴として保持するのみで、UI は新スキーマだけを読む前提で作ってよい。
-- Android の Full UI 実装は、モックデータでは着手しない。backend が `facts`/`state/current`/`timeline` の最小の書き込みパスを用意し、実際に Firestore へ本物のドキュメントが着地してから着手する。
-- Discord の先行検証は Full UI の先行実装ではない。既存の本物の `emergency_events` に対して先に配送・返信を検証し、P2 への移行は後から書き込み境界を切り替える。電話の発信冪等性を変更しない。
 
 ## 4. ユーザーフロー
 
@@ -138,13 +95,13 @@ API・データ構造を見直す前に、まず対応すべきユースケー�
 | 1-4b | 検証失敗 | 失敗理由、再試行、（デモ用）検証済み扱いで続行 | P0-08A | `human_verified` が立たない場合の失敗表示。デモ用バイパス導線は本番ビルドに残さない |
 | 1-5 | プロフィール設定 | ニックネーム、エリア、位置情報共有トグル | P0/P1 | **新規**: `users/{uid}` に `nickname`・`area` フィールドを追加する（6 章のデータモデルに未収録） |
 | 1-6 | アラート音声設定 | 発話言語（日本語/両方/英語）、送信時・接続時の 2 段階アナウンス文言、Silent SOS トグル | P1 | **新規機能**: 8 章「AI の初回発話仕様」とは別に、端末自身がローカル TTS で音声案内する機能。詳細は本節末尾 |
-| 2-1〜2-5 | 緊急連絡先登録（Discord 招待→参加→登録完了） | 一対一の同意付き招待リンク、登録済み受信者一覧、テスト DM と解除 | P1 | **先行実装**: サーバー参加者一覧ではなく、招待相手が明示承認した Discord 個別連絡先。電話/iBeacon 実機確認後に検証する。アプリ間リンクは後続 |
+| 2-1〜2-5 | 緊急連絡先登録（Discord 招待→参加→登録完了） | Discord サーバー招待リンク、参加確認、登録済みメンバー一覧 | P1 | **未決**: 6a 章の「アプリ内 Discord 風 UI」（Option A）と、本モックの「実 Discord をそのまま使う」（Option B）のどちらを採るか要決定。下記参照 |
 | 3-1 | SOS ボタン | 長押しで送信 | P0-09 | 実装中の画面ボタン・Safety gate と一致 |
 | 3-2 | アラート段階 1（送信時） | 画面点灯＋ローカル音声で「緊急警報。登録済みの緊急連絡先へ発信中。位置情報を記録済み」 | P1 | **新規機能**: 端末ローカルの送信時アナウンス。8 章の「AI が相手に話す内容」とは別物。文言は「警察」ではなく「登録済みの緊急連絡先」を主語にする（未決の論点 1 で決定済み） |
 | 3-3 | 送信中ステータス | 位置取得・通報・メンバー通知・録音共有準備のチェックリスト | P0/P1 | 既存の Safety gate → backend 呼び出し順序と一致。UI 化のみ必要 |
 | 3-4 | アラート段階 2（接続時） | 通話が実際につながった時だけローカル音声で「登録済みの緊急連絡先への発信がつながりました」 | P1 | **新規機能**: Twilio `status: in-progress`/`answered` callback を購読し、実接続時のみ発火させる |
 | 3-5 | 並行ステータス（AI 通話＋メンバー通知） | 通話タイマー、Discord 通知配信状況を並列表示 | P1 | 8a 章の `emergencySessions.status` 遷移を UI 化したもの |
-| 3-6 | メンバー側 Discord 通知 | 都道府県レベルの位置と時刻、「状況を返信」ボタン | P1 | 個別 DM を先に検証。座標、精密地図リンク、詳細住所は 8 章のデモ向けプライバシー方針により送信しない |
+| 3-6 | メンバー側 Discord 通知 | 位置、座標、地図、「Call [登録済み緊急連絡先]」「Open map」ボタン | P1 | 文言は「警察」ではなく登録済みの緊急連絡先を指す（未決の論点 1 で決定済み）。最寄り警察署の逆ジオコーディングは不要になった |
 | 3-7〜3-8 | メンバー側: 通話終了後の録音・書き起こし共有 | 音声ファイル再生、ダウンロード、字幕表示、インシデントログ | P1/P2 | **制約と衝突**: 12 章は現状「MVP では音声を録音しない」。録音・共有を行うなら保持期間・同意・削除導線の再設計が必要（13 章の論点 2） |
 
 ### 新規機能: 端末ローカルの 2 段階音声アナウンス
@@ -161,28 +118,14 @@ API・データ構造を見直す前に、まず対応すべきユースケー�
 
 1. **「警察に通報する」という文言・実装をどこまで実現するか** — **決定済み（2026-09-26、人間の判断）**: 警察への自動通報は目標として設定しない。モックの "calls the police" 系の文言・ボタンはすべて「事前登録した緊急連絡先」を主語にした文言へ差し替える（例: 3-6 の「Call [最寄り警察署] Police」→「Call [事前登録した緊急連絡先]」、Stage 1/2 のアナウンスも「警察へ通報しています」ではなく「登録済みの緊急連絡先へ発信しています」等）。1 章・12 章の非目標（公的緊急番号への自動発信はしない）をそのまま維持し、実装・コピーの両方でこれを既定とする。
 2. **通話録音・書き起こしの共有可否**: モック 3-7/3-8 は録音ファイルと書き起こしを友人へ共有する前提。12 章は「MVP では音声を録音しない」としている。録音する場合は同意取得、保持期間（8a 章の 7 日既定に準拠可能）、削除導線、Twilio 側の録音機能（`Record` verb や `<Start><Recording>`）の追加実装が必要になる。P1 以降のスコープとして録音を有効化するかを決める。
-3. **友人共有の優先順位 — 決定済み（2026-09-26 更新）**: Discord Bot の個別 DM と相手のモーダル返信を最初に検証する。これは Discord サーバーの全員向け投稿ではない。友人に LIFELiNK のインストールを求めない。LIFELiNK 同士の Google/Firebase uid による相互承認リンク（6a 章）と友人向けアプリ内ライブ UI は **将来の選択肢** に延期し、ハッカソンでは前提にしない。位置・録音・書き起こしを無条件に Discord へ共有しない。
-
-### Discord 個別連絡の採用設計（2026-09-26、電話/iBeacon 検証後に最優先で縦断確認）
-
-アプリで「Discord の連絡先を招待」→相手の本人確認と通知同意→承認済み連絡先を表示→電話と並行して Bot が個別 DM を送信→相手の返信を緊急イベントの参考情報として記録する。**この方式を先行検証することは決定済み**。電話先 `contact_id` は維持し、Discord 通知の成功は電話発信成功の条件にしない。P0-14a/P0-15 が完了するまでは Discord の実装・テスト送信に着手しない。
-
-Portal アプリ・Bot token の発行と Secret Manager への安全な事前登録は実機検証と独立して先に進めてよい。ただし公開 Interactions endpoint の設定は署名検証/PING 応答をデプロイしてから、DM のテスト送信は P0-14a/P0-15 後とする。調査と手順は `reference/discord-integration.md` に記載。
-
-- **API 制約**: 通常の OAuth2 `identify` はログインした本人だけ、`connections` は外部連携アカウントだけを返す。友人一覧用 `relationships.read` は Discord Social SDK の利用申請が必要。承認なしに「Join Discord → Discord の全 Friends を表示」は実装しない。ユーザートークンや self-bot で非公開 API を呼ばない。公式資料: https://docs.discord.com/developers/topics/oauth2#shared-resources-oauth2-scopes
-- **Discord 側の申請負担（2026-09-26 公式資料確認）**: 小規模な Bot アプリ作成、通常の `identify` OAuth、Bot の DM REST API、ボタン/モーダルの HTTP Interactions に開発者の KYC・事前審査・有償 API 発行は公式の通常手順として記載されていない。Developer Portal でアプリ/Bot と token を発行し、OAuth redirect URI と公開 HTTPS の Interaction endpoint（署名検証と PING 応答）を設定する。ただし Bot DM は相手の受信設定・共通サーバー等で送信失敗や制限があり、**OAuth 承認だけで送信許可・到達が保証されるわけではない**。`relationships.read` は別途 Social SDK 申請が必要なので使わない。大量利用時の privileged intent review（2026-06-10 以降は可視ユーザー 10,000 人基準）は今回の HTTP Interactions 方式では不要。公式資料: https://docs.discord.com/developers/topics/oauth2 ・ https://docs.discord.com/developers/resources/user#create-dm ・ https://docs.discord.com/developers/interactions/overview#configuring-an-interactions-endpoint-url ・ https://docs.discord.com/developers/gateway/getting-started-with-privileged-intent-review
-- **推奨登録体験**: アプリの「Discord 連携」は発信者本人の `identify`（任意）。「Discord の連絡先を招待」で期限付き・一回限りの招待 URL を共有し、**受信者本人** が Discord `identify` を認可するか Bot のリンク用コマンドを実行する。サーバー側で発行者の Firebase UID と招待を照合し、OAuth `state` または署名検証済み Interaction の `user.id` から受信者の Discord ID を取得する。相手が緊急通知と位置共有を明示承認して初めて登録完了。ユーザー名の手入力だけでは本人確認にならない。アプリ画面の一覧は「連携済み・承認済み連絡先」とし、Discord 全友人一覧とは呼ばない。共通サーバーから選ぶ案も友人判定や本人の受信同意の代わりにはならない。
-- **通知と返信**: 新規イベントに対し選択済みの受信者ごとに一回だけ Bot の DM を試み、最小限の都道府県レベルの位置・取得時刻・必要な状況だけとイベントに紐づく「状況を返信」ボタンを送る。デモのプライバシー方針（8 章）に従い GPS 座標・精密地図リンク・詳細住所・通話録音/書き起こしは送らない。DM は相手の設定や共通サーバーの有無等で失敗し得る（例: `50007`、`50278`）。送信成功は既読・通知到達を意味しない。署名検証済み Discord Interaction のボタン→モーダルで返信を受け、`interaction.id` で重複排除し、`event_id`・許可済み `discord_user_id`・有効期限を検証後 `type: friend_comment`、`author_type: friend`、`source: discord` として保存する。Bot は全イベントの作成や電話操作を許可しない。最初の検証では返信は参考情報として保存するだけにし、AI への自動注入・電話先への読み上げは別途同意を決める。
-- **自由文返信を求める場合**: Bot DM の `MESSAGE_CREATE` を受ける Gateway 常時接続が別途必要。DM 本文は `MESSAGE_CONTENT` privileged intent の例外だが、HTTP Interaction endpoint だけでは自由文 DM を受信できない。Cloud Run のスケールゼロ前提とは相性が悪いため、まずは署名付き HTTP Interaction のモーダル返信を候補にする。公式資料: https://docs.discord.com/developers/events/gateway#message-content-intent ・ https://docs.discord.com/developers/interactions/receiving-and-responding#receiving-an-interaction
-- **安全性・検証**: Bot token と OAuth client secret は Secret Manager に限定。Firestore 正本に宛先スナップショット・通知配送状態（未送信/送信済み/失敗、Discord message ID）を持ち、再試行・429・タイムアウト時の重複通知を抑える。送信済み/失敗をアプリに区別表示し、事前に実機で招待→受信同意→テスト DM→返信→イベント表示を通す。Discord は緊急連絡の唯一の経路にせず、電話を主経路とする。位置・発話・返信の公開範囲と保存/削除期間は P1 着手前に確認する。
-
-初回検証の安全側既定: Discord 連携は任意、受信者は電話先とは独立の事前承認済み支援者、まず 1 人で試験、返信は保存のみ、Social SDK 審査には依存しない。複数人配信、電話先自身への DM、AI 注入、精密位置共有は別途決定する。受信者本人の実際の同意と Bot の受信条件は実機/実アカウントで確認する必要がある。
-
-**保存場所（6 章の原則に従う）**: 承認済みの受信者登録は本人だけが読み書きする私的データなので `users/{uid}/discordContacts/{contact_id}`（`discord_user_id`、`display_name_snapshot`、`consented_at`、`status: pending|active|revoked` 程度）に置く。招待は `users/{uid}/discordInvites/{invite_id}` で所有者に紐付け、原文トークンでなくハッシュと有効期限・使用済み状態を保存する。返信は実イベントの共有フィード（先行検証時は `emergency_events/{id}/updates`、P2 化後は `emergencySessions/{id}/facts` と `timeline`）へ backend のみが書く。宛先スナップショットと配送状態のスキーマ、P0→P2 書き込み切替契約は実装より先に本文書で凍結する。
+3. **友人共有 UI の実装方式（Option A vs Option B）**:
+   - **Option A（6a 章、既存設計）**: LIFELiNK アプリ内に Discord 風のネイティブ画面を作る。`friend_links`・`participant_uids`・Compose UI が必要。友人も LIFELiNK アプリのインストールが要る。
+   - **Option B（本モック）**: 実際の Discord サーバー・Bot を使う。友人は Discord に参加するだけでよく（README のストレッチゴールと一致）、位置・地図・音声・書き起こしは Discord の埋め込み/添付として bot が投稿する。実装は Discord Developer Portal での bot 作成、bot token を Secret Manager 管理、Discord API（メッセージ送信、ボタン付き Embed、必要なら Interactions）の実装に置き換わる。
+   - Option B はアプリインストール不要という強い訴求点を実現でき、UI 実装量も Compose の自作チャットより少ない可能性が高い。ただし Discord 側のレート制限・bot 権限・サーバー運用（招待リンクの発行・失効）という新しい外部依存が増える。どちらを採るかで P1 のタスク内容が大きく変わるため、着手前に決定する。
 
 ### 実装しない場合の注記
 
-UI 全体の完成形を先に見る価値はあるが、電話と iBeacon の実機検証を先に終える。Discord 個別 DM はその直後に先行検証し、録音や LIFELiNK 同士の共有 UI は後続とする。
+UI 全体の完成形を先に見る価値はあるが、本節の P1/P2 項目は主線（P0）を止めない。論点 1 は決定済みだが、論点 2・3 が未決のままでも P0 の画面・データ設計には影響しない。
 
 ## 5. システム構成
 
@@ -234,8 +177,6 @@ flowchart LR
 
 ## 6. データモデル案
 
-**コレクション配置の原則（2026-09-26 確定、以後の追加はこれに従う）**: 「1 人の所有者だけが読み書きする私的データ」は `users/{uid}/...` 配下にネストする（`contacts`、`locations` など）。「作成者 1 人 + 閲覧者 N 人（友人・参加者）が絡む共有リソース」はルート直下のコレクションに `owner_uid`（または `uid`）と `participant_uids` を持たせる（`emergency_events`、`emergencySessions`、`friend_links`）。後者をユーザー配下にネストすると「共有されている他人のイベント一覧」が collectionGroup クエリと外部 webhook 経由の owner 解決を必要とし、共有という主目的に対してかえって複雑になるため避ける（8a 章参照）。迷ったら「この document を他人が閲覧する必要があるか」で判定する。
-
 ### `users/{uid}`
 
 - `display_name`
@@ -254,10 +195,11 @@ flowchart LR
 
 ### `users/{uid}/locations/{location_id}`
 
-2026-09-26 のプライバシー方針（8 章）により、Android は `latitude`/`longitude`/`accuracy_m` を API リクエストには含めるが、backend は保存前に削除する。Firestore に残るのは次のとおり。
-
-- `address`（都道府県レベル、Android の `Geocoder.adminArea` で解決）
+- `latitude`
+- `longitude`
+- `accuracy_m`
 - `captured_at`
+- `address`
 - `geocoded_at`
 
 ### `emergency_events/{emergency_event_id}`
@@ -267,7 +209,7 @@ flowchart LR
 - `trigger_type`: `screen_button` または `ble`
 - `trigger_source`: `trigger_type` が `ble` のときのみ `beacon` または `gatt`
 - `state`: `accepted`、`dialing`、`in_progress`、`completed`、`failed`
-- `location_snapshot`（`address`/`captured_at`/`geocoded_at` のみ。GPS 座標・精度は含まない）
+- `location_snapshot`
 - `initial_note`
 - `twilio_call_sid`
 - `created_at`
@@ -285,7 +227,7 @@ flowchart LR
 
 ## 6a. 友人共有とライブフィードのデータモデル（設計を先に確定、実装は P1）
 
-Discord 個別 DM（4a 章）の先行検証と、将来選択肢の LIFELiNK 同士のリアルタイム共有は両立する。本節の `friend_links`・`participant_uids` は将来アプリ間リンクを採用した場合の案で、今回の Discord フローでは作らない。Discord ID を Firebase UID として `participant_uids` に入れない。Discord 返信は backend の署名検証・受信者認可後に保存する。
+主線の実装順序は変えないが、後から作り直さないように、友人向けリアルタイム共有と Discord 風 UI に必要なデータ構造を先に決める。
 
 ### `friend_links/{link_id}`
 
@@ -336,45 +278,11 @@ P0 実装は `type: note` と `type: location` だけを書き込めばよく、
 
 Beacon は接続を維持できない場合の予備トリガーとして使う。
 
-Braveridge「＋Beacon ボタン」製品仕様書 Version 1.0.0 により、製品はボタン操作と無関係に iBeacon 信号を常時送信し、標準アドバタイズ間隔は 2,000ms と確認した。したがって Android UI の受信回数は広告パケット数であり、ボタン押下回数として扱わない。同仕様書にはボタン1/2・短押し/長押しとUUID/Major/Minorの対応は記載されていないため、実広告の変化だけから操作種別を断定しない。対応関係の確定には別紙ソフトウェア仕様書またはメーカー設定情報を使う。
-
-また、電池低下は Major 値の最上位bitで通知される。個体・操作の識別時はこのbitを状態bitとして分離し、電池低下によって別デバイスと誤認しない設計にする。
-
-同一の端末内識別子 `6FF9` から、少なくとも通常時候補の `BB192440-...-A67CC2FE`、`581E31D6-...-CE475485`、`AA82CE42-...-10116876` が観測された。これは別デバイス3台ではなく、同一物理製品が複数の広告状態を送っている可能性が高い。ただし操作との対応は製品仕様書だけでは確定しない。なお観測Majorはいずれも`0x8000`未満で、これらの差は電池低下bitによるものではない。
-
-2026-09-26 にメーカーアプリ（`com.braveridge.pbeacon_button`、「NFCで設定確認・変更」→READ）で実機の設定を読み出し、次を確認した。上記の「常時送信・2,000ms」は製品仕様書の標準値であり、この個体の現設定ではない。
-
-- デバイスID `49C6FC80585C0E3A`、FW 1.0.5、モード「ボタン検知モード」
-- アドバタイズ間隔 1秒、アドバタイズ送信時間 60秒、TxPower 0dBm
-- Beacon0: `BB192440-9E4F-497D-8ACE-7B2BA67CC2FE` / 11665 / 31295（LIFELiNK の発信トリガーに採用済みの値）
-- Beacon1: `581E31D6-E7BA-407A-B12E-949...` / 7290 / 36652
-- Beacon2: `AA82CE42-BFC7-4182-B760-1C...` / 12975 / 16823
-
-したがって、ボタン検知モードでは押下を契機に対応スロットの iBeacon を 1 秒間隔で 60 秒間送信すると解釈する。1 回の押下 = 1 回の 60 秒バーストとして押下回数を数えられるが、同じバースト中の再押下は広告からは区別できない。Beacon0/1/2 がどの操作（ボタン1/2、短押し/長押し）に対応するかはアプリ画面に表示されないため、状態遷移ログで実測して確定する。
-
-**実測結果（2026-09-26 09:31〜09:35、ドライランの状態遷移ログ、確定）**:
-
-| 操作 | 広告 UUID | Major（生値） | Minor |
-| --- | --- | --- | --- |
-| 待機（操作なし） | Beacon0 `BB192440-9E4F-497D-8ACE-7B2BA67CC2FE` | 11665 | 31295 |
-| ボタン1 短押し | Beacon1 `581E31D6-E7BA-407A-B12E-949ACE475485` | 7290 | 36652 |
-| ボタン1 長押し | Beacon1 | 23674（7290 + `0x4000`） | 36652 |
-| ボタン2 短押し | Beacon2 `AA82CE42-BFC7-4182-B760-1CCA10116876` | 12975 | 16823 |
-| ボタン2 長押し | Beacon2 | 29359（12975 + `0x4000`） | 16823 |
-
-- 押下後は対応スロットを約 60 秒送信し、その後 Beacon0（待機）へ戻る。Major の bit14（`0x4000`）が長押し、bit15（`0x8000`）が電池低下、下位 14bit が設定値。
-- **誤りの訂正**: 以前は Beacon0 を発信トリガーにしていたが、Beacon0 は待機広告であり、「押下バースト終了後に待機へ戻った瞬間」に発信候補が出ていた（ログで 3 回確認）。P0-14 の実通話もこの経路で起きた可能性が高い。下記「専用 UUID/Major/Minor」の記述はこの訂正により無効。
-- **新しい発信トリガー規則**: Major bit14（長押し）が立った iBeacon のみ。リンク済みの場合はその機器の BLE アドレスの全スロット（ボタン1/2 どちらの長押しでも可）、未リンクの場合は上表の Beacon1/Beacon2 の長押し値だけを受理する。短押し・待機広告では発信しない。PendingIntent の `ScanFilter` も manufacturer data の bit mask で bit14 を要求し、Receiver でも再検証する。
-- 60 秒バースト中の再押下は区別できない。長押し 1 バースト = 発信候補 1 回（30 秒間隔の重複排除）。
-- 別チームの PoC（PB-BTN-01、長押し後 Major を含む完全一致 filter、観測 10 秒以内・前回受理から 10 秒以上）と対応関係は一致。差分: (1) 本実装は bit mask で長押しを判定するため電池低下 bit が立っても一致を外さない、(2) PoC の「前回受理から 10 秒」は 60 秒バースト中に最大 6 回受理し得るため、本実装は「最後の一致パケットから 30 秒途切れるまで 1 回」を維持する、(3) PoC と同じく `ScanResult.timestampNanos` が 10 秒より古い一致は捨てる（バッチ遅延配送対策）、(4) リンク済み時は BLE アドレスで絞るため、アドレスが電池交換・再起動後も不変かは未検証（変わる場合は再リンクが必要）。ロック中の長時間待機で受信できなかったという PoC の結果は本節・6c 章の「Beacon はロック中の配送保証に使わない」と整合する。
-
 専用 UUID/Major/Minor は次のとおり確定済み（2026-09-26、Agent が生成し本節へ記録）。この値は今後変更しない固定識別子として扱い、`BeaconReceiver` の `ScanFilter` はこの完全一致だけを受理する（ワイルドカードや部分一致は実装しない）。
 
-- UUID: `BB192440-9E4F-497D-8ACE-7B2BA67CC2FE`
-- Major: `11665`
-- Minor: `31295`
-
-2026-09-26 にSamsung物理端末のdebug scanで、manufacturer company ID `0x004C`、iBeacon prefix `0x02 0x15`として同じUUID/Major/Minorを2回観測して確定した。生成した仮値ではなく、物理ボタンが実際に広告するbyte列を正とする。
+- UUID: `D93DBA9A-40E6-4C73-A0DA-BF416BFE0DBF`（LIFELiNK 専用に新規生成。他社ビーコンや別プロダクトと衝突しない）
+- Major: `1`（トリガー種別 = 緊急ボタン。将来別種の Beacon を追加する場合はここを変える）
+- Minor: `1`（個体識別の初号機。複数デバイスを配布する場合は個体ごとに採番する）
 
 ```text
 長押し -> 専用 UUID/Major/Minor を広告
@@ -384,8 +292,6 @@ Braveridge「＋Beacon ボタン」製品仕様書 Version 1.0.0 により、製
 ```
 
 - Beacon 広告にはイベントごとの ACK がないため、同じ広告の複数受信は一回の押下として重複排除する。
-- Android の Beacon 経路はドライラン（発信しない）を既定値とし、画面のスイッチで明示的に OFF にした時だけ実発信する。ドライラン中も重複排除までは本番と同じ処理を通し、「本番なら発信候補」になったバーストを診断ログへ記録する。
-- ボタン操作と UUID/Major/Minor の対応を確定するため、Android は BLE アドレスごとの iBeacon 識別値の変化を「Beacon状態遷移ログ」へ時刻付きで記録する（プロセス内メモリのみ、最大100件、backend へ送らない）。
 - 画面 ON で確実に動く退避経路として保持し、ロック中の配送保証には使わない（ロック中の確実な配送は GATT 側の役割）。
 - 使用箇所は `core` の iBeacon parser / `EventGate` と、`bluetooth` の `BeaconReceiver` / Filter / PendingIntent とする。
 
@@ -582,17 +488,17 @@ BLE 層から電話 API や Firebase を直接呼ばない。Android Controller 
 
 ## 8. AI の初回発話仕様
 
-**位置情報のプライバシー方針（2026-09-26、ハッカソン提出物としての方針）**: GPS 座標（緯度・経度）と位置精度（accuracy）は Android から backend へ送られる際に受理はするが、Firestore へは一切保存しない（`users/{uid}/locations`、`emergency_events.location_snapshot`、`updates.payload` のいずれも住所と時刻のみ）。住所自体も Android の `Geocoder` で都道府県レベル（`adminArea`）までしか解決せず、市区町村・番地を含む詳細住所は端末から一歩も外に出さない。理由は実利用時の安全性ではなく、ETHGlobal Tokyo のデモ・配信で発表者自身の実位置情報が公開されてしまうことを避けるため。実運用でピンポイントの位置共有が必要になった場合は、この制限を明示的に緩める判断を別途行うこと（12 章参照）。
-
 初回発話は次の順序を固定し、欠けている値を推測しない。
 
 1. 「これは LIFELiNK 緊急連絡アプリからの自動電話です」
-2. 都道府県レベルの現在地。取得できない場合は「現在地の都道府県は取得できていません」
-3. 情報の鮮度。例: 「この位置は 45 秒前に取得されました」
-4. ユーザーが発信前に入力した状況メモ
-5. 「新しい情報が入り次第お伝えします」
+2. 住所。取得できない場合は「住所は取得できていません」
+3. 緯度・経度
+4. 位置精度。例: 「精度は約 20 メートルです」
+5. 情報の鮮度。例: 「この位置は 45 秒前に取得されました」
+6. ユーザーが発信前に入力した状況メモ
+7. 「新しい情報が入り次第お伝えします」
 
-古い位置を現在地と断定しない。鮮度が基準を超えた場合は「最後に確認できた位置」と表現する。住所、時刻はモデルに自由生成させず、backend が構造化データから初回メッセージを組み立てる。GPS 座標・番地レベルの住所・位置精度は初回発話にも通話中更新にも含めない。
+古い位置を現在地と断定しない。鮮度が基準を超えた場合は「最後に確認できた位置」と表現する。住所、座標、時刻はモデルに自由生成させず、backend が構造化データから初回メッセージを組み立てる。
 
 ## 8a. 状況ストアと Responses delegation の詳細設計（GPT Live、設計を先に確定、実装は P2）
 
@@ -627,20 +533,12 @@ callee asks a detailed question
 
 P0 実装を壊さないための対応関係を明示する。
 
-- `emergency_events/{id}` は本節の `users/{uid}/emergencySessions/{session_id}` の前身であり、P2 移行時は同じ id 体系（`emergency_event_id` ≒ `session_id`）を引き継ぐ。
+- `emergency_events/{id}` は本節の `emergencySessions/{session_id}` の前身であり、P2 移行時は同じ id 体系（`emergency_event_id` ≒ `session_id`）を引き継ぐ。
 - `emergency_events/{id}/updates/{update_id}`（6a 章で拡張した `type`/`author_type` スキーマ）は、本節の `facts`（事実の正本）と `timeline`（表示・音声用の履歴）に分離される前身である。P2 移行時は `updates` の各レコードを `kind` に応じて `facts` と `timeline` へ振り分ける形で移行する。
 - P0 の `location_snapshot`/`initial_note` は本節の `state/current` の `location`/`address`/`user_notes` に相当する。P2 では `state/current` が Cloud Run transaction で維持する materialized view になる。
 - P0 は Realtime の conversation へ直接 `conversation.item.create` で位置・メモを注入している（5 章）。この経路自体は P2 でも残り、注入元が「Android からの生データ」から「Firestore `state/current`/`facts` 経由の選別済み情報」に変わる。
 
-**コレクション配置についての方針（2026-09-26、再検討して撤回）**: 一度は「所有者（`users/{uid}`）の下にネストする」構成へ変更したが、共有のしやすさを検討し直してルート直下の `emergencySessions/{session_id}` へ戻す。理由:
-
-- この節が扱う `emergency_events`/`emergencySessions` は「作成者 1 人・閲覧者 N 人（友人）」の共有リソースであり、本質的に単一ユーザーの所有物ではない。友人が「自分が owner ではないイベント」を一覧する操作（6a 章の主要ユースケース）は、ルート直下なら `emergency_events`/`emergencySessions` への通常のクエリ（`participant_uids array-contains uid`）で済むが、`users/{uid}` 配下にネストすると `collectionGroup` クエリと専用の合成インデックス、Firestore rules の `match /{path=**}/...` パターンが追加で必要になり、共有という主目的に対してはネストの方が複雑になる。
-- Twilio の status callback や Media Stream の customParameter は event/session ID しか運べない場合が多く、ルート直下なら ID 一発で `db.collection("emergencySessions").doc(id)` に到達できる。ネストだと callback 発行元が毎回 `owner_uid` も一緒に運ぶ設計を徹底する必要があり、外部 webhook 経由の参照が一段階複雑になる。
-- P0 の `emergency_events` も同じ理由でルート直下のまま実装・デプロイ済みである。P0/P2 でコレクション配置の考え方を統一しておいた方が、後日の移行やコードの使い回しがしやすい。
-
-所有者判定は引き続き `owner_uid`（P0 の `emergency_events.uid` に相当）フィールドで行い、友人判定は `participant_uids` 配列で行う（6a 章と同じパターン）。ユーザー削除時の「自分の全イベントを見る」操作は `where("owner_uid", "==", uid)` のクエリで対応する（`users/{uid}` 配下に無くても実装コストは変わらない）。
-
-### Firestore 構造（P2 到達点、ルート直下）
+### Firestore 構造（P2 到達点）
 
 ```text
 emergencySessions/{session_id}
@@ -672,7 +570,7 @@ schema_version: integer
 expires_at: timestamp
 ```
 
-`owner_uid` と `participant_uids`（6a 章と同じ考え方）で全 read/write を認可する。`trigger_event_id` を idempotency key にし、同じ押下から複数発信しない。電話番号は連絡先 document から解決し、クライアント入力を直接保存しない。status 更新と `last_sequence` 採番は transaction で行う。
+`owner_uid` と `participant_uids`（6a 章の `participant_uids` と同じ考え方）で全 read/write を認可する。`trigger_event_id` を idempotency key にし、同じ押下から複数発信しない。電話番号は連絡先 document から解決し、クライアント入力を直接保存しない。status 更新と `last_sequence` 採番は transaction で行う。
 
 #### `facts/{fact_id}`
 
@@ -700,25 +598,6 @@ created_at: timestamp
 
 保存済み fact は変更しない。訂正は新 fact を追加し `supersedes_fact_id` でつなぐ。`observed_at`（端末等の観測時刻）と `received_at`（backend 受信時刻）を分離する。AI 生成内容はセンサー事実として保存しない。address は対応する location fact ID・provider・取得時刻を持つ。位置・健康・音声情報は保持期限を短くする（後述の保持期間）。
 
-`value` は `kind` ごとに次の固定 shape とする（`map` のまま自由形式にしない。新しい `kind` を追加する場合もここに shape を追記してから使う）。
-
-```yaml
-# kind: location
-value: { prefecture: string, latitude: null, longitude: null } # 8 章の方針により座標は常に null、都道府県のみ
-# kind: address
-value: { text: string, provider: string }
-# kind: user_note
-value: { text: string }
-# kind: device_state
-value: { battery_percent: number | null, network: online | offline | unknown }
-# kind: ambient_observation
-value: { text: string, provider: string }
-# kind: friend_reply
-value: { text: string, discord_user_id: string | null }
-# kind: call_state
-value: { twilio_status: string }
-```
-
 #### `state/current`
 
 通話中の即答用 materialized view。fact 追加時に Cloud Run transaction で更新する。
@@ -727,17 +606,15 @@ value: { twilio_status: string }
 version: integer
 last_sequence: integer
 generated_at: timestamp
-location: { fact_id: string | null, prefecture: string | null, observed_at: timestamp | null, freshness: fresh|stale|unavailable }
-address: { fact_id: string | null, text: string | null, provider: string | null, resolved_at: timestamp | null }
-situation: { summary: string, fact_ids: [string], confidence: number | null }
-user_notes: { latest_text: string | null, fact_ids: [string] }
-device: { battery_percent: number | null, network: online|offline|unknown, last_seen_at: timestamp | null }
-active_alerts: [{ code: string, severity: info|warning|critical, text: string, fact_id: string | null, created_at: timestamp }]
+location: { fact_id, latitude, longitude, accuracy_meters, observed_at, freshness: fresh|stale|unavailable }
+address: { fact_id, text, provider, resolved_at }
+situation: { summary, fact_ids, confidence }
+user_notes: { latest_text, fact_ids }
+device: { battery_percent, network: online|offline|unknown, last_seen_at }
+active_alerts: [map]
 recent_fact_ids: [string]
 briefing_text: string
 ```
-
-8 章の方針により `location` に緯度・経度フィールドは持たせず、都道府県（`prefecture`）のみを持つ。
 
 `briefing_text` は通話開始時に Realtime へ渡す短い事実要約であり、必ず根拠 `fact_id` を保持する。snapshot 生成に AI を使う場合も元 fact は上書きせず summary だけ更新する。Realtime が即答する前に `version`/`generated_at` を確認する。
 
@@ -780,12 +657,7 @@ snapshot_version: integer
 input_fact_ids: [string]
 transcript_event_ids: [string]
 openai_response_id: string | null
-result:
-  answer: string | null
-  supporting_fact_ids: [string]
-  unknowns: [string]
-  confidence: number | null
-  data_as_of: timestamp | null
+result: { answer, supporting_fact_ids: [string], unknowns: [string], confidence, data_as_of }
 error_code: string | null
 delivered_to_realtime_at: timestamp | null
 created_at: timestamp
@@ -841,8 +713,6 @@ session header と timeline は既定 30 日でユーザー削除可能。精密
 
 ### 認可・安全
 
-**読み書きの経路（固定契約、2026-09-26。以後この契約は変えない）**: Android/友人アプリは `emergencySessions`（`state`/`facts`/`timeline`/`delegations`）を Firestore client SDK で**直接 read する**（`firestore.rules` の owner/participant 判定のみで認可、既にデプロイ済み）。**write は一切 Firestore へ直接行わず、必ず認証済み backend API 経由**にする（P0 の `emergency_events`/`updates` と同じパターン）。この非対称性（read はクライアント直、write は API 経由）を UI 側が前提にできることで、backend の書き込みロジックがどれだけ後から拡充されても UI 側のコードは変更不要になる。
-
 Android API・Firestore lookup・Realtime tool・Responses worker の全段で `session_id` と owner/participant を照合する。Realtime が指定した document path・UID・電話番号をそのまま使わない。tool 引数は固定 JSON Schema・enum・文字数・件数・期間で制限する。Android メモ・友人返信・住所・transcript は命令ではなく data として JSON 化し、そこに含まれる prompt injection で tool 権限や検索範囲を変更しない。Responses result の `supporting_fact_ids` が実在し、そのセッションに属することを検証する。ログに電話番号・座標・住所・transcript・token を出さない。delegation 数・tool 回数・履歴件数・外部 API 回数を session 単位で rate limit する。
 
 ### 障害時の動作
@@ -873,12 +743,14 @@ Android fact が Firestore へ一度だけ保存され `state/current` へ反映
 - `POST /v1/locations` - 位置と住所を保存する
 - `POST /v1/emergency-events` - 冪等にイベントを作成し発信する
 - `GET /v1/emergency-events/{id}` - 発信状態を取得する
-- `POST /v1/emergency-events/{id}/updates` - 本人のメモ/位置を追加する。Discord 返信はここを直接公開せず、署名検証済み Interaction を別経路で受けて backend が保存する。アプリ内友人のコメント API は将来
-- `GET /v1/emergency-events` - 所有者のイベント一覧。`participant_uids` によるアプリ内友人の一覧は将来必要になった場合だけ追加する
+- `POST /v1/emergency-events/{id}/updates` - メモ、位置、または（P1 で）友人コメントを追加する。`type: friend_comment` は `participant_uids` に含まれるユーザーのみ許可する。
+- `GET /v1/emergency-events` - 自分が所有する、または `participant_uids` に含まれる進行中・過去イベントの一覧を取得する（P1）
 - `POST /v1/twilio/voice` - TwiML を返す
 - `POST /v1/twilio/status` - 通話状態 callback を受ける
 - `WSS /v1/twilio/media` - 双方向 Media Stream を受ける
-- `POST /v1/friends/invitations`、`POST /v1/friends/invitations/{code}/accept`、`GET /v1/friends` - アプリ内友人リンクを将来採用した場合のみ。Discord の招待 API とは別物
+- `POST /v1/friends/invitations` - 招待コードを発行する（P1）
+- `POST /v1/friends/invitations/{code}/accept` - 招待を承認し `friend_links` を `accepted` にする（P1）
+- `GET /v1/friends` - 承認済み友人一覧を取得する（P1）
 
 すべての Android API は Firebase ID token を要求する。Twilio webhook と WebSocket は Twilio 署名を検証する。ログには Authorization、電話番号、API key、音声 payload を記録しない。
 
@@ -929,7 +801,7 @@ Android fact が Firestore へ一度だけ保存され `state/current` へ反映
 - Firebase Android app ID: `1:1023311564471:android:b4e6ad83334551f40e0732`
 - Cloud Run service: `lifelink-backend`、region: `asia-northeast1`
 - Cloud Run URL: `https://lifelink-backend-1023311564471.asia-northeast1.run.app`
-- Cloud Run revision: `lifelink-backend-00022-s5d`
+- Cloud Run revision: `lifelink-backend-00013-dq4`
 - Firestore database ID: `(default)`、region: `asia-northeast1`
 - Cloud Run service account: `lifelink-backend@ethglobaltokyo2026lifelink.iam.gserviceaccount.com`
 - Secret 名と version（値は記録しない）
@@ -977,10 +849,9 @@ Android fact が Firestore へ一度だけ保存され `state/current` へ反映
 - 権限拒否、位置取得失敗、住所取得失敗、通信断、Twilio/OpenAI 障害を確認する。
 - 完了条件: 長押し一回が Android で一回の有効イベントになり、失敗時に二重発信せず、Android に状態と次の操作が表示される。
 
-### Phase 6: Discord 個別連絡の先行縦断検証（Phase 5 の実機完了後）
+### Phase 6: 延期機能
 
-- P0-14a/P0-15 の後に、相手の opt-in 招待・本人確認、Bot テスト DM、実電話イベントと並行した一度だけの DM、モーダル返信のイベント保存を実アカウントで検証する。
-- 電話/iBeacon は主経路として維持し、Discord 障害は非致命的な配送失敗として表示する。Full UI、周辺音声、GATT は縦断確認後に優先度を再判断し、アプリ同士の友人リンクは将来の任意機能に残す。
+- 友人共有、Discord 風履歴、周辺音声を優先順位順に実装する。
 
 World ID / IDKit は延期機能ではなく、実通話前の発信認可として実装する。`world-id-idkit` Skill と Developer Portal MCP を使い、RP signing key は会話やログを経由させず Secret Manager へ直接保存する。
 
@@ -997,7 +868,6 @@ World ID / IDKit は延期機能ではなく、実通話前の発信認可とし
 - Android の Background location は権限・Foreground Service・Google Play 審査の負担が大きいため MVP から外す。GATT 常時接続はロック中配送を目的とするため Background location とは別の制約（6b 章）で扱う。
 - BLE payload には電話番号・位置情報・認証情報・秘密情報を含めない。BLE はイベント通知専用とし、位置情報の収集と発信判断は Android Controller が Safety gate 通過後に行う。
 - 位置情報、電話番号、会話内容は機微情報として扱い、保存量と保持期間を最小化する。MVP では音声を録音しない。（録音・友人共有を行う場合の要件は 4a 章「未決の論点 2」を参照）
-- GPS 座標・位置精度は Firestore へ保存せず、AI にも読み上げさせない。住所は都道府県レベルまでしか解決・保存しない（8 章参照）。これはハッカソンのデモ・配信で発表者の実位置が公開されるのを避けるための方針であり、実運用でピンポイント共有が必要になった場合は明示的に緩和を判断する。
 - AI が誤った位置を作らないよう、位置情報の文面は backend が生成する。
 - 通話相手には冒頭で AI による自動電話であることを明示する。
 - 実番号へのテスト発信は、発信先の事前同意と時間帯の確認後に行う。
@@ -1011,7 +881,7 @@ World ID / IDKit は延期機能ではなく、実通話前の発信認可とし
 - 位置情報を何分で「古い」と扱うか
 - 誤操作防止 UI を長押し、確認カウントダウン、スライドのどれにするか
 - イベント、位置、メモの保持期間
-- 4a 章「未決の論点」2（通話録音/書き起こしの共有可否）。アプリ間の友人リンク/UI は将来実装するか自体を後で判断する。警察自動通報は非目標で、Discord DM の先行検証は決定済み
+- 4a 章「未決の論点」1〜3（警察自動発信の文言・実装範囲、通話録音共有の可否、友人 UI をアプリ内自作にするか実 Discord を使うか）
 
 Phase 7（GATT）着手前に決める項目（6c 章参照）:
 
@@ -1046,10 +916,6 @@ Phase 7（GATT）着手前に決める項目（6c 章参照）:
 - OpenAI Realtime API: https://developers.openai.com/api/docs/guides/realtime
 - OpenAI Realtime conversations: https://developers.openai.com/api/docs/guides/realtime-conversations
 - World ID IDKit integration: https://docs.world.org/world-id/idkit/integrate
-- Discord OAuth2 scopes and bot users: https://docs.discord.com/developers/topics/oauth2
-- Discord Create DM and restrictions: https://docs.discord.com/developers/resources/user#create-dm
-- Discord HTTP Interactions endpoint and signature validation: https://docs.discord.com/developers/interactions/overview#configuring-an-interactions-endpoint-url
-- Discord privileged intent review thresholds: https://docs.discord.com/developers/gateway/getting-started-with-privileged-intent-review
 
 ## 15. 変更管理
 
