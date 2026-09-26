@@ -8,6 +8,8 @@
 
 ## 人間が Discord 側で今できる準備（DM はまだ送らない）
 
+**準備状況（2026-09-26、ユーザー報告と GCP メタデータ確認）**: Developer Portal アプリを作成し、Application ID と Public Key はユーザーが控え済み。`key-discord-bot-token` と `key-discord-oauth-client-secret` は対象 GCP project に存在し、各 version 1 が `enabled`。**秘密値の中身や Discord API での有効性は確認していない**。OAuth Redirect URLs、Installation Contexts、Interactions Endpoint URL その他 Portal の細かいオプションは未設定。Cloud Run への Secret 割り当て、実行サービスアカウントの Secret 参照権限、OAuth コールバック/署名検証 API、DM テストも未実施。
+
 1. [Developer Portal](https://discord.com/developers/applications) に自分の Discord アカウントでログインし、**New Application / Create App** で LIFELiNK 用アプリを 1 つ作る。新規アプリには Bot user が既定で付く。**General Information** の `Application ID`（OAuth `client_id`、非秘密）と `Public Key`（Interactions 署名検証用、非秘密）を控える。Bot とユーザーの「友達申請」はできない。
 2. **Bot → Token → Reset Token** で Bot token を発行する。表示は原則一度だけ。**OAuth2 → Client Secret** は招待を受けた相手の `identify` authorization-code 認可で server-side token exchange を行う場合に使う。こちらも秘密。OAuth token と Bot token は別物で、いわゆる単一の「Discord API キー」はない。**Bot token と Client Secret はこのチャット、Git、スクリーンショット、端末の履歴に貼らず、GCP Secret Manager の追加バージョン画面へ直接入力する**。一度漏れた token は Developer Portal 側で再発行し、Secret のバージョンを差し替える。[公式 Bot 入門](https://docs.discord.com/developers/quick-start/getting-started#fetching-your-credentials)
 3. **OAuth2 → Redirects / Redirect URLs** に、後で実装する HTTPS callback の正確な URL を登録する。候補は既存 Cloud Run ドメインの `/v1/discord/oauth/callback`（実装前なのでまだアクセス不能）。保存時の URL と認可時の `redirect_uri` は完全一致させる。相手本人の Discord ID は `identify` scope で `/users/@me` から取得し、OAuth の `state` とサーバー側の招待情報を照合する。`email`、`connections`、`relationships.read`、`dm_channels.read` はこの最小フローに不要。ユーザーの OAuth access/refresh token は本人確認後に不要なら保持しない。[OAuth2 authorization code](https://docs.discord.com/developers/topics/oauth2#authorization-code-grant) / [state](https://docs.discord.com/developers/topics/oauth2#state-and-security)
@@ -34,4 +36,4 @@
 
 ## 未実施のもの
 
-この文書は**公開公式資料と現行設計の整理**で、Discord アプリ作成・Secret 登録・DM 到達試験の実施記録ではない。Bot token/Client Secret/公開 ID はまだ取得済みとして扱わない。P0-14a/P0-15 終了後に既存の `emergency_events`/`updates` を用いた実データの縦断試験を開始する。実装と schema を決める前には `doc/plan.md` を先に更新する。
+この文書は公開公式資料と現行設計の整理、および上記の **Secret メタデータ確認**の記録。Secret の内容・Discord API 接続・DM 到達・受信同意は未検証。P0-14a/P0-15 終了後に既存の `emergency_events`/`updates` を用いた実データの縦断試験を開始する。実装と schema を決める前には `doc/plan.md` を先に更新する。
