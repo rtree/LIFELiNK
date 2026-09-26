@@ -8,7 +8,7 @@
 
 このアプリは公的な緊急通報の代替ではない。警察、消防、救急などの緊急番号へ自動発信するものではなく、ユーザーが指定した家族・友人などへの連絡を補助する。
 
-このプロダクトの核心は発信そのものだけではない。ボタン押下で AI が事前登録した相手に電話し、並行して同意済みの友人へ状況を知らせ、返信を緊急イベントの参考情報として受け取る。2026-09-26 に **Discord 個別 DM を友人共有の最初の縦断検証として採用**した。電話と iBeacon 長押しの実機検証を終えてから着手し、その後にアプリ同士の Google アカウント連携、ライブ UI、返信の AI 活用へ広げる。友人全員が LIFELiNK をインストールすることは Discord 通知の条件にしない。
+このプロダクトの核心は発信そのものだけではない。ボタン押下で AI が事前登録した相手に電話し、並行して同意済みの友人へ状況を知らせ、返信を緊急イベントの参考情報として受け取る。2026-09-26 に **Discord 個別 DM を友人共有の最初の縦断検証として採用**した。電話と iBeacon 長押しの実機検証を終えてから着手する。アプリ内の Google アカウント同士の友人リンク・共有 UI は **将来の任意機能** とし、ハッカソン提出と Discord フローの完成条件にはしない。友人全員が LIFELiNK をインストールすることは Discord 通知の条件にしない。
 
 ## 1a. 主要ユースケース（ドメイン認識の共有、2026-09-26）
 
@@ -27,12 +27,12 @@ API・データ構造を見直す前に、まず対応すべきユースケー�
   - **現状の対応**: Discord 個別 DM を電話/iBeacon 検証直後の最優先フローに決定。アプリ同士の共有も後続要件として残す（4a 章）。どちらもまだ実装済みではない。
 5. **認可レベルの 3 段階**: World ID の人間性証明が無くてもアプリは使える（ログイン・初期設定はできる）。ただし緊急発信には人間性証明が必須。そもそもアプリへログインするには Google アカウントが必須。
    - **現状の対応**: 5 章・8a 章の設計、および `backend/src/auth.ts` の `authenticate`（Google のみ）と `requireHumanVerification`（Google + World ID）の 2 段階実装が、この 3 段階の認可レベルとちょうど一致している。追加の不足はない。
-6. **友人リンクの手段は 2 種類**: 友人リンクの理想形は Discord の identity を指定すること。ただし LIFELiNK アプリ同士でのリンクもあり得るため、Google アカウント（のメールアドレス）でもリンクできるようにする。
-  - **方針決定（2026-09-26）**: 二者択一ではなく両方をサポートする。**実装順は Discord identity による個別連絡を先、LIFELiNK Google アカウント同士の `friend_links` を後**。次回のデータ設計で `link_type: lifelink | discord` という共通概念と、私的な `discordContacts`・相互承認の `friend_links` の責任分界を凍結する。Google メールアドレスの手入力だけで友人本人と判定しない。
+6. **友人リンクは Discord を先行**: 通知先は Discord identity と明示同意で登録する。LIFELiNK アプリ同士の Google アカウントを使う相互リンクも将来は検討できる。
+  - **方針決定（2026-09-26 更新）**: `discordContacts` による個別 DM の縦断フローだけを先行実装する。`friend_links` や `link_type: lifelink | discord` の共通抽象化は必要になるまで実装しない。アプリ内の友人リンクは将来機能であり、Discord 成功後に必ず実装する約束ではない。Google メールアドレスの手入力だけで友人本人と判定しない。
 7. **UI は複数画面に分割する**: 1 画面に詰め込まず、uimock で共有した通り機能ごとに画面を分ける。これは初回登録だけでなく、後からの更新・再登録操作（1 の物理ボタン再登録、6 の友人解除など）のためにも重要。
    - **現状の対応**: 4a 章の画面インベントリで既に多画面構成を採用済み。ただし「登録」画面はあっても「解除・再登録」の画面/操作が明示されていない箇所がある（友人解除、物理ボタン再登録）。次回の画面設計で登録系の全画面に対応する解除・編集導線を明示する。
 
-上記の不足点（1 の物理ボタンのアカウント紐付け、3 の `accuracy_m` 復活、6 の友人リンク二本立て化）は、次回の API・データ設計の見直しで反映する。スキーマ自体はまだ変更しない。
+上記の不足点のうち物理ボタンのアカウント紐付けと `accuracy_m` は次回の API・データ設計で検討する。アプリ内友人リンクの二本立て化は将来の再評価事項であり、今回の Discord スキーマを待たせない。
 
 ## 2. ハッカソン MVP の成功条件
 
@@ -89,7 +89,7 @@ API・データ構造を見直す前に、まず対応すべきユースケー�
 1. **P0-14a/P0-15: 電話と iBeacon の実機検証を完了する。** 短押し・待機広告では発信候補 0、長押し 1 回で発信 1 回、実通話と失敗時の二重発信防止を確認する。過去の Beacon0 由来の通話は長押し成功の証跡に数えない。
 2. **Discord 個別 DM の最小縦断フローを先に通す。** 実データの保存先（私的な招待/連絡先、イベントへの配送状態と返信）と API 契約を `doc/plan.md` で先に凍結し、本人確認付き招待→相手の明示同意→Bot テスト DM とボタン応答→実際の電話イベント発生時の DM→モーダル返信の保存まで、実際の Discord アカウントと Cloud Run/Firestore で検証する。既存の `emergency_events/{id}/updates` をこの **検証用の実イベント** の正本に用いることは可。ただし UI 用のダミーや一時 fixture は作らない。Bot の送信失敗・429・タイムアウトでも電話を止めず、二重 DM を抑える。
 3. **Discord 縦断フロー確認後、P2 の最小書き込みパスを実装する。** `emergencySessions`/`facts`/`state/current`/`timeline` への新規実イベントの保存を固め、Discord の返信も `friend_reply` fact と `friend_message` timeline に載せる。既存 `emergency_events` テストデータは移行しない。スキーマを変更する場合は必ず本書を先に修正する。
-4. **ここから Full UI と delegations 等を並行する。** Android は Firestore で本物の P2 コレクションを直接購読し、backend は同じスキーマへ書き込む。アプリ同士の Google 友人リンク、AI への第三者返信注入、GATT、録音は個別の後続作業とする。未実装画面はダミーを表示せず「準備中」と明示する。
+4. **ここから Full UI と delegations 等を並行する。** Android は Firestore で本物の P2 コレクションを直接購読し、backend は同じスキーマへ書き込む。アプリ同士の Google 友人リンク・友人向け UI は将来の別判断とし、AI への第三者返信注入、GATT、録音も個別の後続作業とする。未実装画面はダミーを表示せず「準備中」と明示する。
 5. **残り時間のチェックポイント**: P0 が未検証なら Discord に進まない。Discord が受信者の同意または Bot の DM 到達条件で詰まれば実測した失敗を記録し、電話+iBeacon の動作するデモへ戻す。Discord の縦断フローが成立したら、その成果を維持した上で残り時間を Full UI・P2 に割く。
 
 **決定事項（2026-09-26、人間確認済み）**:
@@ -161,13 +161,14 @@ API・データ構造を見直す前に、まず対応すべきユースケー�
 
 1. **「警察に通報する」という文言・実装をどこまで実現するか** — **決定済み（2026-09-26、人間の判断）**: 警察への自動通報は目標として設定しない。モックの "calls the police" 系の文言・ボタンはすべて「事前登録した緊急連絡先」を主語にした文言へ差し替える（例: 3-6 の「Call [最寄り警察署] Police」→「Call [事前登録した緊急連絡先]」、Stage 1/2 のアナウンスも「警察へ通報しています」ではなく「登録済みの緊急連絡先へ発信しています」等）。1 章・12 章の非目標（公的緊急番号への自動発信はしない）をそのまま維持し、実装・コピーの両方でこれを既定とする。
 2. **通話録音・書き起こしの共有可否**: モック 3-7/3-8 は録音ファイルと書き起こしを友人へ共有する前提。12 章は「MVP では音声を録音しない」としている。録音する場合は同意取得、保持期間（8a 章の 7 日既定に準拠可能）、削除導線、Twilio 側の録音機能（`Record` verb や `<Start><Recording>`）の追加実装が必要になる。P1 以降のスコープとして録音を有効化するかを決める。
-3. **友人共有の優先順位 — 決定済み（2026-09-26）**: Discord Bot の個別 DM と相手のモーダル返信を最初に検証する。これは Discord サーバーの全員向け投稿ではない。友人に LIFELiNK のインストールを求めない。その後、LIFELiNK 同士の Google/Firebase uid による相互承認リンク（6a 章）、アプリ内ライブ UI を実装する。**両方を最終的にサポート**し、Option A/B の二者択一にはしない。位置・録音・書き起こしを無条件に Discord へ共有しない。
+3. **友人共有の優先順位 — 決定済み（2026-09-26 更新）**: Discord Bot の個別 DM と相手のモーダル返信を最初に検証する。これは Discord サーバーの全員向け投稿ではない。友人に LIFELiNK のインストールを求めない。LIFELiNK 同士の Google/Firebase uid による相互承認リンク（6a 章）と友人向けアプリ内ライブ UI は **将来の選択肢** に延期し、ハッカソンでは前提にしない。位置・録音・書き起こしを無条件に Discord へ共有しない。
 
 ### Discord 個別連絡の採用設計（2026-09-26、電話/iBeacon 検証後に最優先で縦断確認）
 
 アプリで「Discord の連絡先を招待」→相手の本人確認と通知同意→承認済み連絡先を表示→電話と並行して Bot が個別 DM を送信→相手の返信を緊急イベントの参考情報として記録する。**この方式を先行検証することは決定済み**。電話先 `contact_id` は維持し、Discord 通知の成功は電話発信成功の条件にしない。P0-14a/P0-15 が完了するまでは Discord の実装・テスト送信に着手しない。
 
 - **API 制約**: 通常の OAuth2 `identify` はログインした本人だけ、`connections` は外部連携アカウントだけを返す。友人一覧用 `relationships.read` は Discord Social SDK の利用申請が必要。承認なしに「Join Discord → Discord の全 Friends を表示」は実装しない。ユーザートークンや self-bot で非公開 API を呼ばない。公式資料: https://docs.discord.com/developers/topics/oauth2#shared-resources-oauth2-scopes
+- **Discord 側の申請負担（2026-09-26 公式資料確認）**: 小規模な Bot アプリ作成、通常の `identify` OAuth、Bot の DM REST API、ボタン/モーダルの HTTP Interactions に開発者の KYC・事前審査・有償 API 発行は公式の通常手順として記載されていない。Developer Portal でアプリ/Bot と token を発行し、OAuth redirect URI と公開 HTTPS の Interaction endpoint（署名検証と PING 応答）を設定する。ただし Bot DM は相手の受信設定・共通サーバー等で送信失敗や制限があり、**OAuth 承認だけで送信許可・到達が保証されるわけではない**。`relationships.read` は別途 Social SDK 申請が必要なので使わない。大量利用時の privileged intent review（2026-06-10 以降は可視ユーザー 10,000 人基準）は今回の HTTP Interactions 方式では不要。公式資料: https://docs.discord.com/developers/topics/oauth2 ・ https://docs.discord.com/developers/resources/user#create-dm ・ https://docs.discord.com/developers/interactions/overview#configuring-an-interactions-endpoint-url ・ https://docs.discord.com/developers/gateway/getting-started-with-privileged-intent-review
 - **推奨登録体験**: アプリの「Discord 連携」は発信者本人の `identify`（任意）。「Discord の連絡先を招待」で期限付き・一回限りの招待 URL を共有し、**受信者本人** が Discord `identify` を認可するか Bot のリンク用コマンドを実行する。サーバー側で発行者の Firebase UID と招待を照合し、OAuth `state` または署名検証済み Interaction の `user.id` から受信者の Discord ID を取得する。相手が緊急通知と位置共有を明示承認して初めて登録完了。ユーザー名の手入力だけでは本人確認にならない。アプリ画面の一覧は「連携済み・承認済み連絡先」とし、Discord 全友人一覧とは呼ばない。共通サーバーから選ぶ案も友人判定や本人の受信同意の代わりにはならない。
 - **通知と返信**: 新規イベントに対し選択済みの受信者ごとに一回だけ Bot の DM を試み、最小限の都道府県レベルの位置・取得時刻・必要な状況だけとイベントに紐づく「状況を返信」ボタンを送る。デモのプライバシー方針（8 章）に従い GPS 座標・精密地図リンク・詳細住所・通話録音/書き起こしは送らない。DM は相手の設定や共通サーバーの有無等で失敗し得る（例: `50007`、`50278`）。送信成功は既読・通知到達を意味しない。署名検証済み Discord Interaction のボタン→モーダルで返信を受け、`interaction.id` で重複排除し、`event_id`・許可済み `discord_user_id`・有効期限を検証後 `type: friend_comment`、`author_type: friend`、`source: discord` として保存する。Bot は全イベントの作成や電話操作を許可しない。最初の検証では返信は参考情報として保存するだけにし、AI への自動注入・電話先への読み上げは別途同意を決める。
 - **自由文返信を求める場合**: Bot DM の `MESSAGE_CREATE` を受ける Gateway 常時接続が別途必要。DM 本文は `MESSAGE_CONTENT` privileged intent の例外だが、HTTP Interaction endpoint だけでは自由文 DM を受信できない。Cloud Run のスケールゼロ前提とは相性が悪いため、まずは署名付き HTTP Interaction のモーダル返信を候補にする。公式資料: https://docs.discord.com/developers/events/gateway#message-content-intent ・ https://docs.discord.com/developers/interactions/receiving-and-responding#receiving-an-interaction
@@ -282,7 +283,7 @@ flowchart LR
 
 ## 6a. 友人共有とライブフィードのデータモデル（設計を先に確定、実装は P1）
 
-Discord 個別 DM（4a 章）の先行検証と、後続の LIFELiNK 同士のリアルタイム共有は両立する。本節の `friend_links`・`participant_uids` は後続のアプリ間リンクに適用し、Discord ID を Firebase UID として `participant_uids` に入れない。Discord 返信は backend の署名検証・受信者認可後に保存する。
+Discord 個別 DM（4a 章）の先行検証と、将来選択肢の LIFELiNK 同士のリアルタイム共有は両立する。本節の `friend_links`・`participant_uids` は将来アプリ間リンクを採用した場合の案で、今回の Discord フローでは作らない。Discord ID を Firebase UID として `participant_uids` に入れない。Discord 返信は backend の署名検証・受信者認可後に保存する。
 
 ### `friend_links/{link_id}`
 
@@ -870,14 +871,12 @@ Android fact が Firestore へ一度だけ保存され `state/current` へ反映
 - `POST /v1/locations` - 位置と住所を保存する
 - `POST /v1/emergency-events` - 冪等にイベントを作成し発信する
 - `GET /v1/emergency-events/{id}` - 発信状態を取得する
-- `POST /v1/emergency-events/{id}/updates` - メモ、位置、または（P1 で）友人コメントを追加する。`type: friend_comment` は `participant_uids` に含まれるユーザーのみ許可する。
-- `GET /v1/emergency-events` - 自分が所有する、または `participant_uids` に含まれる進行中・過去イベントの一覧を取得する（P1）
+- `POST /v1/emergency-events/{id}/updates` - 本人のメモ/位置を追加する。Discord 返信はここを直接公開せず、署名検証済み Interaction を別経路で受けて backend が保存する。アプリ内友人のコメント API は将来
+- `GET /v1/emergency-events` - 所有者のイベント一覧。`participant_uids` によるアプリ内友人の一覧は将来必要になった場合だけ追加する
 - `POST /v1/twilio/voice` - TwiML を返す
 - `POST /v1/twilio/status` - 通話状態 callback を受ける
 - `WSS /v1/twilio/media` - 双方向 Media Stream を受ける
-- `POST /v1/friends/invitations` - 招待コードを発行する（P1）
-- `POST /v1/friends/invitations/{code}/accept` - 招待を承認し `friend_links` を `accepted` にする（P1）
-- `GET /v1/friends` - 承認済み友人一覧を取得する（P1）
+- `POST /v1/friends/invitations`、`POST /v1/friends/invitations/{code}/accept`、`GET /v1/friends` - アプリ内友人リンクを将来採用した場合のみ。Discord の招待 API とは別物
 
 すべての Android API は Firebase ID token を要求する。Twilio webhook と WebSocket は Twilio 署名を検証する。ログには Authorization、電話番号、API key、音声 payload を記録しない。
 
@@ -979,7 +978,7 @@ Android fact が Firestore へ一度だけ保存され `state/current` へ反映
 ### Phase 6: Discord 個別連絡の先行縦断検証（Phase 5 の実機完了後）
 
 - P0-14a/P0-15 の後に、相手の opt-in 招待・本人確認、Bot テスト DM、実電話イベントと並行した一度だけの DM、モーダル返信のイベント保存を実アカウントで検証する。
-- 電話/iBeacon は主経路として維持し、Discord 障害は非致命的な配送失敗として表示する。アプリ同士のリンク、Full UI、周辺音声、GATT はこの縦断確認の後に着手する。
+- 電話/iBeacon は主経路として維持し、Discord 障害は非致命的な配送失敗として表示する。Full UI、周辺音声、GATT は縦断確認後に優先度を再判断し、アプリ同士の友人リンクは将来の任意機能に残す。
 
 World ID / IDKit は延期機能ではなく、実通話前の発信認可として実装する。`world-id-idkit` Skill と Developer Portal MCP を使い、RP signing key は会話やログを経由させず Secret Manager へ直接保存する。
 
@@ -1010,7 +1009,7 @@ World ID / IDKit は延期機能ではなく、実通話前の発信認可とし
 - 位置情報を何分で「古い」と扱うか
 - 誤操作防止 UI を長押し、確認カウントダウン、スライドのどれにするか
 - イベント、位置、メモの保持期間
-- 4a 章「未決の論点」2（通話録音/書き起こしの共有可否）と、Discord 個別 DM 以外のアプリ間友人 UI の詳細。警察自動通報は非目標、Discord DM を先に検証し後で Google アプリ間リンクも実装する方針は決定済み
+- 4a 章「未決の論点」2（通話録音/書き起こしの共有可否）。アプリ間の友人リンク/UI は将来実装するか自体を後で判断する。警察自動通報は非目標で、Discord DM の先行検証は決定済み
 
 Phase 7（GATT）着手前に決める項目（6c 章参照）:
 
@@ -1045,6 +1044,10 @@ Phase 7（GATT）着手前に決める項目（6c 章参照）:
 - OpenAI Realtime API: https://developers.openai.com/api/docs/guides/realtime
 - OpenAI Realtime conversations: https://developers.openai.com/api/docs/guides/realtime-conversations
 - World ID IDKit integration: https://docs.world.org/world-id/idkit/integrate
+- Discord OAuth2 scopes and bot users: https://docs.discord.com/developers/topics/oauth2
+- Discord Create DM and restrictions: https://docs.discord.com/developers/resources/user#create-dm
+- Discord HTTP Interactions endpoint and signature validation: https://docs.discord.com/developers/interactions/overview#configuring-an-interactions-endpoint-url
+- Discord privileged intent review thresholds: https://docs.discord.com/developers/gateway/getting-started-with-privileged-intent-review
 
 ## 15. 変更管理
 
