@@ -17,6 +17,11 @@
   AI の初回発話で「SOS を押したのは <氏名>、<生年月日>生まれ（<年齢>歳）」と伝える。未設定なら言わない。Discord DM 本文には載せない（書き起こし経由では流れる）。
 - **World ID の解除（P1-18、凍結）**: `POST /v1/world-id/revoke`（Firebase 認証）で custom claim `human_verified` を外す。
   `world_id_nullifiers` の紐付けは残す（同じ人間を別アカウントに再利用させないため）。同じアカウントでの再認証は既存フローで可能。解除後は `POST /v1/emergency-events` が 403。
+  再認証かどうかは claim ではなく「この UID の `world_id_nullifiers` があるか」で判定し、あれば一意の action（`verify-emergency-caller-reverify-<uuid>`）を使う。
+  World ID は同じ action で同じ人間の 2 度目の証明を `nullifier_replayed` で拒否するため（2026-09-26 実機で踏んだ、rev `00035-bsv` で修正）。
+- **AI の役割設定（2026-09-26 人間決定、V1/V2 共通）**: SOS を押した本人は声を出せない・隠れている可能性がある（声で答えさせない、沈黙を無事とみなさない）。
+  電話の連絡先は警察や警備会社など**実際に助けに行ける人**を想定し、情報を積極的に伝える。Discord は**近くにいる家族・友人**を想定。
+- **ハッカソン中の利用者許可リストは設けない**（2026-09-26 人間決定）。第三者が APK で SOS を出すと Twilio/OpenAI の料金がかかるリスクは承知の上。
 - **位置の定期更新（2026-09-26）**: 見守り FGS（`BeaconMonitorService`）の種別に `location` を足し（アプリ前面から開始するので while-in-use 制約内、`ACCESS_BACKGROUND_LOCATION` は不要）、
   画面 OFF・ロック中も 5 分ごとに `POST /v1/locations`、SOS 進行中は 20 秒ごとにイベントへ `location` 更新を送る。保存するのは従来どおり都道府県・精度・電池・揺れだけ。
 - MVP 0.1（電話・Beacon・Discord）、P1-16/17/20 は完了。8a 章の状況ストア移行は PX-14〜19 へ延期し、ハッカソンでは実装しない。

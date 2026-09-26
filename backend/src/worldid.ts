@@ -213,7 +213,13 @@ export function registerWorldIdRoutes(app: FastifyInstance, db: Firestore): void
   app.post("/v1/world-id/start", { preHandler: authenticate }, async (request, reply) => {
     const { signingKeyHex } = requireWorldIdConfig();
     const user = await getAuth().getUser(request.user.uid);
-    const isReverification = user.customClaims?.human_verified === true;
+    // World ID rejects a second proof for the same action, so any account already bound uses a fresh action.
+    const alreadyBound = !(await db
+      .collection("world_id_nullifiers")
+      .where("uid", "==", request.user.uid)
+      .limit(1)
+      .get()).empty;
+    const isReverification = alreadyBound || user.customClaims?.human_verified === true;
     const action = isReverification
       ? `${config.WORLD_ID_ACTION}-reverify-${randomUUID()}`
       : config.WORLD_ID_ACTION;

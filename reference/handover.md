@@ -112,6 +112,7 @@ ssh beacon-host '"$HOME/Library/Android/sdk/platform-tools/adb" -s RFGL41GKP0Z l
 - **SOSV2 の統合は IMS が元の 2 本を切って新しい会議通話 1 本に置き換える**（`IMS_MERGED_SUCCESSFULLY`、親子関係は付かない）。応答直後は `conferenceableCalls` が空なので `conference()` は 1 秒ごとに再試行する。1 回だけにすると AI が保留のまま残る（実際に踏んだ）。
 - **LIFELiNK が既定の電話アプリの間は普段の着信も LIFELiNK の画面**。戻すときは Settings の「Change the phone app」。確認: `adb shell cmd role get-role-holders android.app.role.DIALER`。APK を入れ直しても役割は維持されるが、Beacon 見守りは止まるので再開すること。
 - **会議 SOS 中は通話音量を最小にし、全通話終了で元に戻す**。途中でプロセスが落ちると音量が最小のまま残り得る。
+- **World ID は同じ action で同じ人間の 2 度目の証明を `nullifier_replayed` で拒否する**。再認証は必ず一意の action（`-reverify-<uuid>`）で行う。判定を claim にすると「解除→再認証」で踏む（実際に踏んだ、rev `00035-bsv` で nullifier の有無判定に修正）。
 
 ## 6. 既知のギャップ（バグではなく、把握済みの未対応）
 
