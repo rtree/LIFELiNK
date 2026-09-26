@@ -93,16 +93,20 @@ P2-09〜11 は独立録音の代替案として保留し、この電話実験の
 
 | ID | 状態 | タスク | 依存 | 完了条件 |
 | --- | --- | --- | --- | --- |
-| P2-07 | IN PROGRESS | 利用者周辺の声・音を AI と友人へ届ける方式を評価する（音声は永続化しない） | 同意・法務判断 | 手動キャリア会議のみユーザー確認済み。次は P2-12〜16 の電話経由実験。独立録音なら `updates.type: ambient` 案。どちらも `emergencySessions` 移行は不要。詳細は `reference/ambient-verification.md` |
+| P2-07 | DONE | 利用者周辺の声・音を AI と友人へ届ける方式を評価する（音声は永続化しない） | 同意・法務判断 | 2026-09-26: キャリア3者会議（SOSV2-ambientMode）で実現し既定化（P2-12〜16）。独立録音案 P2-09〜11 は代替として保留。詳細は `reference/ambient-verification.md` |
 | P2-08 | DONE | マイク権限とマニフェスト宣言を「事前設定」として用意する（緊急時に権限ダイアログを出さないため） | P1-17 | `RECORD_AUDIO` / `FOREGROUND_SERVICE_MICROPHONE` を宣言し、Settings から事前に許可を取れる。許可状態が画面に出る |
 | P2-09 | TODO | `microphone` 種別の FGS を実装し、**画面 OFF・ロック中に実際に非無音の PCM が取れるかを実機で測る** | P2-08 | `reference/ambient-verification.md` 5 章のチェックリストを埋める。`AudioRecord.registerAudioRecordingCallback()` で `isClientSilenced()` を常に記録し、「録れている」と「送れている」を分けて計る |
 | P2-10 | TODO | 15 秒チャンクを backend へ POST し、`gpt-4o-mini-transcribe` の結果だけを `updates.type: "ambient"` へ保存する取り込みパス | P2-09 | 無音チャンク（RMS 閾値以下）は送らない。音声バイトは Firestore ・ログ・一時ファイルのどこにも残さない。**AI への注入は間引く**（意味が変わったときだけ・最短間隔あり）。さもないと通話が実況中継になる |
 | P2-11 | TODO | 非発話音（叫び声・ガラス・アラーム）を MediaPipe + YAMNet で端末内分類する | P2-10、時間が余った場合 | 追加コスト $0 で「Screaming」「Glass」等を同じ `ambient` へ書く。音声は端末から出ない |
-| P2-12 | DONE | キャリア会議実験の基準点・使用番号・inbound 契約を確定する（E0） | 手動3者通話は確認済み、番号用途と参加者の同意 | **番号は確定**: `PNbe25648b5f32bd261cb3ac9039855fd3`（+1629280xxxx）をユーザー承認で転用し、旧 Voice URL を削除済み（2026-09-26）。残り: mode、認可済み pending event、期限付き一回照合、CallSid、終了、混合 transcript を plan に先に凍結 |
-| P2-13 | IN PROGRESS | 既存 backend に実験イベント準備と AI 番号の着信 webhook を隔離追加する（E1） | P2-12 | 2026-09-26 19:10 実装・デプロイ済み（rev `00030-j5p`、戻し先 `00029-pfg`、env `TWILIO_AI_INBOUND_NUMBER` 追加）。番号の Voice URL=`/v1/twilio/inbound`、StatusCallback=`/v1/twilio/inbound/status`。署名なし 403 を確認。Home に「Experimental: conference SOS」を追加し実機導入。残り: 実機でコード照合・旧 SOS の回帰確認 |
+| P2-12 | DONE | キャリア会議実験の基準点・使用番号・inbound 契約を確定する（E0） | 手動3者通話は確認済み、番号用途と参加者の同意 | 番号 `PNbe25648b5f32bd261cb3ac9039855fd3`（+1629280xxxx）をユーザー承認で転用し旧 Voice URL を削除。契約は `doc/plan.md`「キャリア会議実験の凍結契約」 |
+| P2-13 | DONE | 既存 backend に実験イベント準備と AI 番号の着信 webhook を隔離追加する（E1） | P2-12 | rev `00030-j5p` 以降（現行 `00033-77z`、env `TWILIO_AI_INBOUND_NUMBER`）。Voice URL=`/v1/twilio/inbound`、StatusCallback=`/v1/twilio/inbound/status`。署名なし 403、実機でコード照合・join 成功 |
 | P2-14 | DONE | 標準 Samsung dialer の手動操作で AI 単独→連絡先追加→会議を確認する（E2/E3） | P2-13、同意済み実番号 | 2026-09-26 19:15 3 者通話成立（`reference/ambient-verification.md` 0.5）。rev `00031-dfn` 後の再試験で「保留中に AI が黙る・話者を推測と言う・画面 OFF でも会話継続」をユーザー確認 |
 | P2-15 | DONE | 最低限の実ダイヤラー機能（約2画面＋α）と画面の実験 SOS を実装・実機確認する（E4） | P2-14 | 2026-09-26 20:40 実機確認（ユーザー）: role 取得、ダイヤル画面からの通常発信、画面の「Start conference SOS」で AI→join 確認→連絡先→**自動統合**（IMS は元の 2 本を新しい会議通話に置き換える。応答直後は conferenceable が空なので 1 秒ごとに再試行）、AI の振る舞い及第点。発信元端末は**マイク ON・受話口・通話音量最小・通話画面を点けない**（「ほとんど聞こえない」を確認）、終了後に音量を復元。backend rev `00033-77z`（AI に通話シーケンスと Discord 閲覧を指示）、commit `3b6fdc8`。未確認: 60 秒の呼び出し打ち切り、LIFELiNK 経由の通常着信。戻し方: Settings で電話アプリを Samsung に戻す（`cmd role get-role-holders android.app.role.DIALER`）。今後の改善: 統合タイミングを backend 経由で AI に伝えると話者推定が改善する |
-| P2-16 | IN PROGRESS | Settings の Beacon SOS route 選択を追加しロック起点を確認する（E5） | P2-15 | 2026-09-26 実装・実機導入: Settings「Button SOS mode」で `SOSV1-nope` / `SOSV2-ambientMode`（**既定 V2**、人間決定）。V2 かつ電話アプリ保持時は Beacon 押下→carrier_conference イベント→`ConferenceSosOrchestrator` を自動開始、条件未達なら V1 にフォールバック。残り: ロック中の Beacon 押下で会議 SOS が最後まで進むかの実機確認（60秒広告／75秒途切れ規則と Safety gate は変更なし） |
+| P2-16 | DONE | Settings の Beacon SOS route 選択を追加しロック起点を確認する（E5） | P2-15 | 2026-09-26 21:00 実機確認（ユーザー）: Settings「Button SOS mode」で `SOSV1-nope` / `SOSV2-ambientMode`（**既定 V2**、人間決定）。**ロック中の Beacon 押下 → Discord 緊急 DM → 連絡先に電話 → 3 者通話**まで成立。電話アプリ未設定・`CALL_PHONE` 無しなら V1 にフォールバック。60 秒広告／75 秒途切れ規則と Safety gate は変更なし。commit `8284897` |
+| P2-17 | TODO | SOSV2 で AI が参加できないときも連絡先には必ず電話する | P2-16 | 現状は AI の join を 45 秒待って失敗すると連絡先に**発信しない**（Twilio/backend 障害で誰にもつながらない）。join 失敗・AI 通話が切れた場合は連絡先へ直接発信し、状態を画面とログに出す。二重発信しないこと |
+| P2-18 | TODO | SOSV2 の未確認経路を実機で確認する | P2-16 | (1) 連絡先が 60 秒出ないと発信をやめ AI の保留が解除される、(2) 普段の着信を LIFELiNK の画面で応答／拒否できる、(3) 画面 OFF・ロック中の着信表示、(4) 電話アプリを Samsung に戻すと Beacon が V1 にフォールバックする |
+| P2-19 | TODO | 統合のタイミングを AI に伝え、話者の推測を助ける | P2-16 | 統合成功時に Android→backend へ `note` 相当の更新（例: "The contact has just joined"）を送り、既存の注入キューで AI に伝える。新規スキーマは作らない |
+| P2-20 | TODO | Discord 招待の同意文に「通話の書き起こしが届く」「SOSV2 では本人周辺の音声も通話に乗る」を明記する | なし | README の既知の同意ギャップを解消。既存の同意済み連絡先の扱い（再同意の要否）も決める |
 
 ## P3（欠番）
 
@@ -148,12 +152,9 @@ P2-09〜11 は独立録音の代替案として保留し、この電話実験の
 
 1. ~~**P1-16**: アプリ内チャット風ライブ表示~~ **完了（2026-09-26 15:08、実通話で確認済み）**。
 2. ~~**P1-17**: 英語化・B2C 向け UI 整形~~ **完了（2026-09-26 15:30、3 タブ化・テーマ適用・全文英語化）**。
-3. **P2-12 → P2-13 → P2-14（次の実験）**: `reference/ambient-verification.md` 0 章を読み、番号用途・inbound 契約確認から開始。
-   手動3者通話とロック後マイク到達は確認済みだが、Twilio AI はまだ未参加。まず標準 dialer で AI＋連絡先＋Discord を検証し、
-   成功後に P2-15（通話UI／画面SOS）→P2-16（Beacon旧新選択）へ。P2-08は完了、P2-09〜11の録音案は代替として保留。
-4. 並行して、実端末で縦断フローを何度も回して MVP を堅牢化する。壊れたものをその場で直し、
-   見つかった問題をタスクとして本ファイルへ追加する。
-5. P1-18 → P1-19（World ID 再認証・解除、Passport/Selfie 対応）。
-6. PX（状況ストア、異常系の網羅、アプリ内友人リンク、GATT）は時間が余った場合のみ。
+3. ~~**P2-12 → P2-16**: キャリア3者会議（SOSV2-ambientMode）~~ **完了（2026-09-26 21:00、ロック中の Beacon から3者通話まで実機確認、既定 V2）**。
+4. **次の候補**（上から推奨順）: P2-17（AI 不参加でも連絡先に電話）→ P1-18（World ID 認証の解除・再認証）→ P2-20（Discord 同意文）→ P2-18（未確認経路）→ P2-19（統合を AI に通知）。
+5. 並行して、実端末で縦断フローを何度も回して堅牢化する。壊れたものをその場で直し、見つかった問題をタスクとして本ファイルへ追加する。
+6. P1-19（Passport/Selfie）と PX（状況ストア、異常系の網羅、アプリ内友人リンク、GATT）は時間が余った場合のみ。
 
 リファクタリング時は `reference/mvp0.1.md` の「既知の制約」、特に `maxScale=1` 前提に注意する。

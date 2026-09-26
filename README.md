@@ -8,6 +8,8 @@
 
 LIFELiNK is an Android emergency-contact app. Set up a phone contact in advance, verify that you are a unique human with World ID, and arm a screen button or link a BLE button. When you trigger an SOS, LIFELiNK calls your contact via Twilio; an OpenAI Realtime voice assistant explains the available context, listens, and passes along new information. Consenting friends receive a Discord DM, the live call transcript, and an opportunity to reply. Their replies can reach the person on the call through the assistant. The app shows the same event as a live conversation.
 
+In the default **SOSV2-ambientMode**, the phone itself also joins: with LIFELiNK set as the phone app, a button press—even on a locked phone—quietly calls the AI and your contact from your own SIM and merges them into one carrier three-way call, so the AI and your contact can hear what is happening around you while your phone stays silent and dark.
+
 **日本語で:** 事前登録した連絡先へ、声が出せない場面でもボタン操作から電話で知らせるアプリです。World ID の Proof of Human を通話起動の条件とし、本人の氏名や身分証をアプリ側で収集せずに「一人の人間か」という信頼を得ます。電話・AI・同意済みの友人を同じ緊急イベントに接続します。
 
 > **Scope, not a safety guarantee:** This is a hackathon prototype for contacting *people you have registered*, not an emergency-services/119/110 dispatch system. It cannot guarantee BLE reception, a successful call, an accurate location, or a timely response. Do not rely on it as your sole way to get help.
@@ -58,6 +60,18 @@ The owner creates a one-use, expiring invitation. A friend follows the link, sig
 
 If World App verification is unavailable, cancelled, expired, or rejected, the proof is **not** upgraded to `human_verified`; without that claim the backend rejects `POST /v1/emergency-events` with 403 **before** invoking Twilio. The Android UI surfaces failure/expiry and allows another attempt. If the account is already verified, a later connector failure does not revoke its earlier claim; revocation and reauthentication controls are future work. The tested real-device success path and the server-enforced unverified path should be distinguished from a claim that every phone/network failure has been exhaustively tested.
 
+### 6. SOSV2-ambientMode — your own phone joins the call (default)
+
+The original flow (**SOSV1**) never puts the person in danger on the line: the backend calls the contact and the AI speaks for them. That cannot convey what is happening around them. SOSV2 closes that gap without any special microphone privilege:
+
+1. The user makes LIFELiNK the default phone app (`RoleManager.ROLE_DIALER`, a real dial pad and in-call UI through `InCallService`).
+2. A button press creates the same World ID–gated event with `mode: carrier_conference`. The backend notifies Discord but **does not** dial out; it returns an AI number and a one-time 6-digit join code valid for 10 minutes.
+3. The phone calls the AI number over its own SIM and sends the code as DTMF. Twilio's signed webhook matches the code hash to the pending event, binds that inbound CallSid once, and connects the same bidirectional Media Stream to OpenAI Realtime. A caller ID alone is never trusted.
+4. The phone then calls the contact (the AI leg goes on hold; the call gives up after 60 seconds without an answer) and merges both calls with `Call.conference()`. The carrier's **IMS conference** mixes the audio—this is **not** a Twilio Conference; Twilio is just one participant.
+5. On the caller's phone the microphone stays on, audio goes to the earpiece at minimum volume, and the in-call screen does not light up. The AI is told the call sequence, that speakers are mixed and must be guessed, to ignore hold announcements, to describe sounds only as possibilities, and that Discord friends read the live transcript. The AI leg leaves after 60 minutes; the carrier call between humans is never cut by the backend.
+
+The user can switch the button between **SOSV1-nope** and **SOSV2-ambientMode** in Settings; if LIFELiNK is not the phone app, the button falls back to SOSV1 so an SOS is never silently dropped. Emergency numbers always use the system dialer.
+
 ## Architecture
 
 ```mermaid
@@ -66,7 +80,10 @@ flowchart LR
 		SOS[Screen SOS / linked +Beacon]
 		ID[World App connector]
 		Feed[Live event feed]
+		Dialer[Default phone app · InCallService]
 	end
+	Carrier[Carrier IMS three-way call]
+	Contact[Registered contact]
 	World[World ID v4 verifier]
 	API[Cloud Run · Fastify / TypeScript]
 	DB[(Firestore)]
@@ -81,6 +98,10 @@ flowchart LR
 	API <-->|Realtime PCMU WebSocket| AI
 	API <-->|DM · transcript · signed replies| Friends
 	DB -->|read-only Firebase subscription| Feed
+	SOS -.->|SOSV2| Dialer
+	Dialer <-->|SIM calls + merge| Carrier
+	Carrier <--> Contact
+	Carrier <-->|AI leg, join code| Voice
 ```
 
 **Authority boundaries:** Google/Firebase authenticates the account; World ID proves the selected human property; Cloud Run decides whether to spend resources and write data; Twilio carries the call; the LLM describes incoming context but is **not** the security gate. Secrets stay in GCP Secret Manager. Firestore client writes are denied; Android reads its event/feed directly under security rules, while all changes pass through backend authorization. Twilio callbacks and Discord interactions are signature checked.
@@ -101,6 +122,7 @@ flowchart LR
 - Android SOS, settings and World App handoff: [MainActivity](android/app/src/main/java/com/rtree/LIFELiNK/MainActivity.kt); BLE scan and gating: [BeaconTriggerManager](android/app/src/main/java/com/rtree/LIFELiNK/BeaconTriggerManager.kt), [EmergencySafetyGate](android/app/src/main/java/com/rtree/LIFELiNK/EmergencySafetyGate.kt).
 - Server-side RP signing, IDKit request/polling, verification and nullifier binding: [World ID integration](backend/src/worldid.ts); claim gate: [authentication](backend/src/auth.ts).
 - Emergency events, idempotent creation, location privacy and update ingestion: [backend API](backend/src/server.ts); phone audio: [Realtime bridge](backend/src/voice.ts); consent, DMs and replies: [Discord integration](backend/src/discord.ts).
+- SOSV2: default phone app [InCallService](android/app/src/main/java/com/rtree/LIFELiNK/LifeLinkInCallService.kt), [in-call UI](android/app/src/main/java/com/rtree/LIFELiNK/InCallActivity.kt), [dial pad](android/app/src/main/java/com/rtree/LIFELiNK/DialerActivity.kt), [conference orchestration](android/app/src/main/java/com/rtree/LIFELiNK/ConferenceSosOrchestrator.kt); inbound AI webhook and join code: [backend API](backend/src/server.ts); evidence: [ambient verification](reference/ambient-verification.md).
 - Actual Firebase authorization rules: [Firestore rules](firestore.rules); complete schemas and design decisions: [project plan](doc/plan.md); reproducible MVP evidence: [MVP 0.1 record](reference/mvp0.1.md).
 
 ## Key innovations — why these choices matter
@@ -132,7 +154,7 @@ The [ETHGlobal Tokyo 2026 World prize](https://ethglobal.com/events/tokyo2026/pr
 
 ## What we built and verified
 
-This is **implemented**, not a clickable mock: a Samsung Android 16 phone completed Google login and a production World ID Proof of Human, then a linked +Beacon long press created one event and an actual Twilio call (a recorded 46-second completed call; press-to-ring approximately seven seconds in that run). Idle/short-press advertisements produced no call in the dry run. Separate longer real calls validated Twilio ↔ OpenAI audio, AI speech, in-call notes, and transcript capture. A consenting real Discord account received the alert and transcript, replied several times, and the AI passed those replies to the person on the call. Later real-device runs confirmed the Home/Members/Settings UI and the Firestore-backed live feed. These are observations from the hackathon setup, **not** a latency or reliability guarantee; see [the reproducible MVP record](reference/mvp0.1.md) and [the evolving task/evidence log](doc/tasks.md).
+This is **implemented**, not a clickable mock: a Samsung Android 16 phone completed Google login and a production World ID Proof of Human, then a linked +Beacon long press created one event and an actual Twilio call (a recorded 46-second completed call; press-to-ring approximately seven seconds in that run). Idle/short-press advertisements produced no call in the dry run. Separate longer real calls validated Twilio ↔ OpenAI audio, AI speech, in-call notes, and transcript capture. A consenting real Discord account received the alert and transcript, replied several times, and the AI passed those replies to the person on the call. Later real-device runs confirmed the Home/Members/Settings UI and the Firestore-backed live feed. **SOSV2 was also verified on the same Samsung phone (SoftBank SIM):** with the screen locked, a +Beacon press sent the Discord alert, the phone called the AI and the contact, and the carrier merged all three into one call; the AI followed the hold/speaker rules and the caller's phone was nearly inaudible. These are observations from the hackathon setup, **not** a latency or reliability guarantee; see [the reproducible MVP record](reference/mvp0.1.md) and [the evolving task/evidence log](doc/tasks.md).
 
 ### A demo a judge can follow
 
@@ -151,9 +173,10 @@ To reproduce the environment rather than imitate the UI, start with [host and bu
 | Speaking during a live AI response | In-call updates queue while Realtime is generating speech and drain at `response.done`; sending a competing `response.create` caused real errors. |
 | Discord DM permissions | OAuth consent alone is insufficient in the current demo; Bot and recipient must share a Discord server or Discord returns `50278`. A failed DM does not imply the call failed. |
 | Data minimization vs. useful emergency context | We avoid persisting or speaking raw GPS coordinates and street addresses, but **do** store the registered phone number, coarse area, accuracy, battery/motion metadata, and transcripts. Call audio files are not stored. The current Discord invite mentions the alert, coarse location, note, and replies **but not transcript relay**; the demo also does **not** announce sharing to the person answering the call. Explicit informed consent and retention rules are required before production. |
+| Carrier three-way calls (SOSV2) | Works on the tested Galaxy + SoftBank; other carriers/devices may not offer conferencing. IMS replaces both legs with a new conference call and offers the merge only moments after the answer, so the app retries each second. Voices are mixed on one Twilio track, so the AI can only guess who is speaking. Being the default phone app means LIFELiNK must also handle ordinary calls. |
 | Operational readiness | Single-instance live-session state, network/BLE uncertainty, retention and consent policy, abuse/rate controls, and failure-mode coverage need further work. This is a prototype, not a certified safety system. |
 
-Next: validate lock-screen microphone behavior **before** claiming ambient sound support (only permission setup exists today); complete World ID revoke/reverification UX and consider additional credentials only for use cases that actually need them; design a durable multi-instance Realtime update path and a production-grade consent, retention, and incident-response policy. Ambient audio capture, app-to-app friends, GATT button transport, and the proposed richer `emergencySessions` store are **not** shipping features in this MVP. Current priorities and deferred work are tracked in [tasks](doc/tasks.md).
+Next: complete World ID revoke/reverification UX and consider additional credentials only for use cases that actually need them; make SOSV2 fall back to a direct contact call when the AI cannot join; tell the AI when the contact joins to improve speaker guesses; design a durable multi-instance Realtime update path and a production-grade consent, retention, and incident-response policy. Standalone on-device ambient recording/classification (as opposed to the SOSV2 phone call), app-to-app friends, GATT button transport, and the proposed richer `emergencySessions` store are **not** shipping features. Current priorities and deferred work are tracked in [tasks](doc/tasks.md).
 
 ## Q&A
 
