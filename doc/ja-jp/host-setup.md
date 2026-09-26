@@ -113,7 +113,7 @@ ssh araki@10.211.55.2 'zsh -lc "arduino-cli board list"'
 
 ### 5. firmware ディレクトリの用意（実装は Phase 7 まで着手しない）
 
-`doc/plan.md` 6b 章の通り、GATT 実装自体は主線と Beacon 完動後（Phase 7）まで着手しない。ここではツールチェーンの動作確認（付属 Blink サンプルの書き込み）だけを host で行い、実際の `firmware/xiao_gatt_button/` のコードは Phase 7 で作成する。
+`doc/ja-jp/plan.md` 6b 章の通り、GATT 実装自体は主線と Beacon 完動後（Phase 7）まで着手しない。ここではツールチェーンの動作確認（付属 Blink サンプルの書き込み）だけを host で行い、実際の `firmware/xiao_gatt_button/` のコードは Phase 7 で作成する。
 
 ## 完了条件
 
