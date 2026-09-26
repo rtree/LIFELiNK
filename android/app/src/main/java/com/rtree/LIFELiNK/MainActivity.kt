@@ -1,6 +1,7 @@
 package com.rtree.LIFELiNK
 
 import android.Manifest
+import android.app.role.RoleManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -9,6 +10,8 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Build
 import android.os.SystemClock
+import android.provider.Settings
+import android.telecom.TelecomManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -270,6 +273,17 @@ private fun SetupScreen() {
                 if (event.aiNumber != null && event.joinCode != null) {
                     conferenceJoin = event.aiNumber to event.joinCode
                     emergencyText = "Call the AI, then add and merge your contact"
+                    if (isDefaultPhoneApp(context) && event.contactPhone != null) {
+                        val started = ConferenceSosOrchestrator.start(
+                            context = context,
+                            apiClient = apiClient,
+                            eventId = event.eventId,
+                            aiNumber = event.aiNumber,
+                            joinCode = event.joinCode,
+                            contactPhone = event.contactPhone,
+                        )
+                        if (started) emergencyText = "Calling the AI, then your contact"
+                    }
                 }
                 if (event.state in TERMINAL_EVENT_STATES) {
                     safetyGate.clear(event.eventId)
@@ -635,6 +649,9 @@ private fun SetupScreen() {
                     ) {
                         Text("Update my location")
                     }
+
+                    HorizontalDivider()
+                    PhoneAppSection()
 
                     HorizontalDivider()
                     Text("Listening (coming soon)", style = MaterialTheme.typography.titleLarge)
@@ -1288,6 +1305,8 @@ private fun ConferenceSosSection(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text("Experimental: conference SOS", style = MaterialTheme.typography.titleMedium)
+            val autoStatus by ConferenceSosOrchestrator.status.collectAsStateWithLifecycle()
+            autoStatus?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             Text(
                 "Instead of LIFELiNK calling your contact, you call the AI yourself, then use " +
                     "\"Add call\" for your contact and \"Merge\". Your Discord members still get a DM.",
@@ -1316,6 +1335,49 @@ private fun ConferenceSosSection(
         }
     }
 }
+
+@Composable
+private fun PhoneAppSection() {
+    val context = LocalContext.current
+    var isDefault by remember { mutableStateOf(isDefaultPhoneApp(context)) }
+    val requestRole = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) {
+        isDefault = isDefaultPhoneApp(context)
+    }
+    Text("Phone app (experimental)", style = MaterialTheme.typography.titleLarge)
+    Text(
+        "Make LIFELiNK your phone app so a conference SOS can call the AI and your contact and " +
+            "merge them for you. LIFELiNK then also handles your normal calls. Emergency numbers " +
+            "always use the system phone app. You can switch back any time.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Text(
+        if (isDefault) "LIFELiNK is your phone app" else "LIFELiNK is not your phone app",
+        color = if (isDefault) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error,
+    )
+    Button(
+        modifier = Modifier.fillMaxWidth(),
+        onClick = {
+            if (!isDefault && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val roleManager = context.getSystemService(RoleManager::class.java)
+                requestRole.launch(roleManager.createRequestRoleIntent(RoleManager.ROLE_DIALER))
+            } else {
+                requestRole.launch(Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS))
+            }
+        },
+    ) {
+        Text(if (isDefault) "Change the phone app" else "Make LIFELiNK the phone app")
+    }
+}
+
+fun isDefaultPhoneApp(context: Context): Boolean =
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        context.getSystemService(RoleManager::class.java).isRoleHeld(RoleManager.ROLE_DIALER)
+    } else {
+        context.getSystemService(TelecomManager::class.java).defaultDialerPackage == context.packageName
+    }
 
 private fun callStateText(state: String): String = when (state) {
     "accepted" -> "SOS accepted"

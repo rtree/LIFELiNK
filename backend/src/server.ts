@@ -340,7 +340,12 @@ app.post(
             updated_at: FieldValue.serverTimestamp(),
           });
         }
-        return { outcome: "existing" as const, state, reissued: reissue };
+        return {
+          outcome: "existing" as const,
+          state,
+          reissued: reissue,
+          destination: contact.get("phone_e164") as string,
+        };
       }
 
       transaction.create(eventRef, {
@@ -429,6 +434,7 @@ app.post(
             ai_number: config.TWILIO_AI_INBOUND_NUMBER,
             join_code: joinCode.code,
             join_expires_at: joinCode.expiresAt.toDate().toISOString(),
+            contact_phone: result.destination,
           }
         : {}),
     });

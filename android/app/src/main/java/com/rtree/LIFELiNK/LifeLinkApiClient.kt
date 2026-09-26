@@ -60,6 +60,7 @@ data class EmergencyEventResult(
     val idempotentReplay: Boolean,
     val aiNumber: String? = null,
     val joinCode: String? = null,
+    val contactPhone: String? = null,
 )
 
 data class EmergencyEventStatus(
@@ -139,6 +140,7 @@ class LifeLinkApiClient(
             idempotentReplay = response.getBoolean("idempotent_replay"),
             aiNumber = response.optString("ai_number").takeIf(String::isNotBlank),
             joinCode = response.optString("join_code").takeIf(String::isNotBlank),
+            contactPhone = response.optString("contact_phone").takeIf(String::isNotBlank),
         )
     }
 

@@ -32,6 +32,7 @@ AI 待受番号は Twilio `PNbe25648b5f32bd261cb3ac9039855fd3`（番号本体は
 - `POST /v1/emergency-events` に任意の `mode: "outbound" | "carrier_conference"`（既定 `outbound`＝従来どおり）。
   `carrier_conference` では Discord 通知は従来どおり、**Twilio outbound はしない**。応答に
   `ai_number`、`join_code`（6 桁）、`join_expires_at`（10 分後）を追加。同じ event ID の再送では、未使用ならコードを再発行する。
+  P2-15 から `contact_phone`（本人が登録した連絡先の E.164。認証済み owner への応答だけに載せ、ログ・Firestore へ新たに書かない）も返し、自作ダイアラーが連絡先へ発信する。
 - `emergency_events/{id}` への追加フィールド（backend のみ書く）:
   `mode`、`join_code_hash`（SHA-256。原文は保存・ログしない）、`join_expires_at`、`join_used_at`。
   既存 `state` の意味は維持: 作成時 `accepted` → コード一致で `in_progress`（AI 着信の CallSid を `twilio_call_sid` に一度だけ bind）→ AI レッグ終了で `completed`。
