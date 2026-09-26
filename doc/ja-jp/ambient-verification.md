@@ -15,8 +15,8 @@
 
 ## 0. このセッションを再開する人へ
 
-**読む順序**: `reference/handover.md`（プロジェクト全体の不変条件・環境・落とし穴）→ 本ファイル → 必要なら
-`doc/tasks.md` の P2 節。**`handover.md` を読まずに環境を触らないこと。**
+**読む順序**: `doc/ja-jp/handover.md`（プロジェクト全体の不変条件・環境・落とし穴）→ 本ファイル → 必要なら
+`doc/ja-jp/tasks.md` の P2 節。**`handover.md` を読まずに環境を触らないこと。**
 
 ### 現在地（2026-09-26 時点）
 
@@ -40,7 +40,7 @@ P2-08 は完了。P2-09〜11 のローカル録音案は残すが、**次は P2-
 ### 次の一手（この順で）
 
 1. **0.4〜0.11 の結論・境界を確認**。まず候補 Twilio 番号の所有用途と既存設定を読み取り専用で確認し、復旧基準を記録する。
-2. 新モードのイベント準備、着信とイベントの照合、終了状態、混合音声の表示を `doc/plan.md` で先に契約化する。
+2. 新モードのイベント準備、着信とイベントの照合、終了状態、混合音声の表示を `doc/ja-jp/plan.md` で先に契約化する。
 3. 既存 backend に隔離した実験入口を最小追加し、**Samsung 標準ダイアラーのまま AI 番号へ手動発信→相手を追加→手動統合**。
   AI↔Galaxy↔連絡先の相互音声、ロック中の音声、Discord の書き起こし／返信を同じ実イベントで確認する。
 4. 成功してから `ROLE_DIALER` / 通話 UI と画面の実験 SOS を実装・検証する。
@@ -102,7 +102,7 @@ ssh beacon-host "$ADB logcat -s LIFELiNK.BeaconLog"
   `pending` / `responseActive` / `response.done` を介した注入待ち行列を保つ。独立録音 PCM を既存入力へ追加する案と、
   **キャリアが混合した1本の電話レッグを通常の Media Stream で受ける今回の案は別物**。
 - Cloud Run は既存サービス共用、**`maxScale=1` を維持**。Firestore 共用だけではインメモリのセッション表・Discord キューは分散されない。
-- `emergency_events` / `updates` は維持。追加フィールドもコードより先に `doc/plan.md` で凍結する。旧データの移行・削除、8a 章の状況ストア導入をしない。
+- `emergency_events` / `updates` は維持。追加フィールドもコードより先に `doc/ja-jp/plan.md` で凍結する。旧データの移行・削除、8a 章の状況ストア導入をしない。
 - Firestore は backend Admin SDK だけが書く。UI は本物のドキュメントを購読し、モックを作らない。
 - Twilio の現行発信番号 `key-twilio-from-number`（SID `PN25e30a4c7e287953ff4ebce4d33c3771`）を勝手に変更しない。
   別番号 +1629280xxxx（SID `PNbe25648b5f32bd261cb3ac9039855fd3`）は **2026-09-26 にユーザー承認で AI 着信実験用へ転用済み**。
@@ -326,7 +326,7 @@ Galaxy（利用者のマイク／受話音声）
   Twilio 側の `completed` は「3者が助け合えた」証明ではない。AI レッグ終了と carrier 会議全体終了は区別する。
 - timeout の秒数・全体上限・1ユーザー同時イベント上限は契約化時に決める。CallSid が不明なまま追加発信で埋め合わせない。
 - **＋Beacon は長押し bit14（`0x4000`）を実測済み**。一般的な iBeacon 全てに長押しがあるわけではないが、
-  この機種で「長押し識別は未確認」と書き戻さない。現行仕様は短押し／長押し・ボタン1/2の全4パターンを候補にする（`reference/beacon-verification.md`）。
+  この機種で「長押し識別は未確認」と書き戻さない。現行仕様は短押し／長押し・ボタン1/2の全4パターンを候補にする（`doc/ja-jp/beacon-verification.md`）。
 - 広告送信60秒、途切れ判定75秒。**同じボタン・同じ押し方の再押下は広告上で区別できない**。
   パケット数を押下回数にしてはならない。別ボタン／短長切替は別状態だが、応答や終了に割り当てるなら別の状態機械と実測が必要。
   したがって「もう一回押せば着信に応答」は現状のままでは保証できない。ルート切替だけのために受信閾値を短くしない。
@@ -364,7 +364,7 @@ Twilio のフレーム数は送受信の補助証拠であり、キャリア先�
 
 ### 0.11 次セッションへの依頼文と未決事項
 
-> `reference/handover.md` → `reference/ambient-verification.md` 0章 → `doc/tasks.md` P2-12〜16 を読む。
+> `doc/ja-jp/handover.md` → `doc/ja-jp/ambient-verification.md` 0章 → `doc/ja-jp/tasks.md` P2-12〜16 を読む。
 > Galaxy＋SoftBank の手動3者通話とロック後マイク到達はユーザー確認済み。Twilio AI 参加は未検証。
 > 既存 Cloud Run / Firestore / Discord と通常 SOS を温存し、まず番号用途の read-only 確認と inbound 実験の契約化をする。
 > 最初の縦断試験は標準 Samsung dialer の手動会議。成功後にだけ自作 dialer UI→画面 SOS→Beacon opt-in を進める。
@@ -492,7 +492,7 @@ LIFELiNK が該当すると確認した事実はなく、宣言だけでマイ�
 
 ## 5. ローカル録音を実機で確かめること（未実施）
 
-Samsung SM-S942Z / Android 16 / serial `RFGL41GKP0Z`。手順は `reference/handover.md` 3 章。
+Samsung SM-S942Z / Android 16 / serial `RFGL41GKP0Z`。手順は `doc/ja-jp/handover.md` 3 章。
 
 - [ ] マイク権限を許可した状態で、アプリ前面から `microphone` FGS を起動して非無音の PCM が取れるか
 - [ ] **画面 OFF・ロック中に録音が継続するか**（`isClientSilenced()` を毎回ログ）。ここが最大の未知数
@@ -551,7 +551,7 @@ SoundTrigger 系はユーザーが選択した `VoiceInteractionService` 専用�
 ## 7. プライバシーと規約
 
 - **「保存しない」と「送らない」は別の約束**。E/D を採ると生音声は一時的に端末外へ出る。
-  OpenAI 側の保持ポリシーは我々の管理外である。`doc/plan.md` 12 章に明記すること。
+  OpenAI 側の保持ポリシーは我々の管理外である。`doc/ja-jp/plan.md` 12 章に明記すること。
 - マイク使用中インジケータ（Android 12+）は**消せない**。`WindowInsets.getPrivacyIndicatorBounds()` は
   「どこに出るか」を知るためだけの API。
 - `VIEW_PERMISSION_USAGE` の intent filter を持つ Activity を用意すると、
@@ -564,7 +564,7 @@ SoundTrigger 系はユーザーが選択した `VoiceInteractionService` 専用�
 
 ## 8. 実装の設計案（**未凍結**）と未決事項
 
-### 8.1 スキーマ案（`doc/plan.md` へ書いてから実装すること）
+### 8.1 スキーマ案（`doc/ja-jp/plan.md` へ書いてから実装すること）
 
 `emergency_events/{id}/updates/{update_id}` に `type: "ambient"` を足す案。6a 章の既存スキーマに乗る形:
 
@@ -601,7 +601,7 @@ Android 側のライブフィードは `EmergencyFeed.kt` の mapper に `"ambie
 - **同意の取り方と文言**。「緊急時にマイクで周囲を聞き、テキスト化して連絡先と友人に共有する」ことへの
   明示同意をどの画面でどう取るか。Play の目立つ開示（prominent disclosure）要件に関わる。
 - **「保存しない」と「送らない」は別の約束**（7 章）。チャンク送信方式を採るなら生音声は一時的に
-  OpenAI へ渡る。この差を `doc/plan.md` 12 章へ明記し、同意文言にも反映するか。
+  OpenAI へ渡る。この差を `doc/ja-jp/plan.md` 12 章へ明記し、同意文言にも反映するか。
 - **録音を開始する条件**。SOS 発信中だけか、見守り中も常時か。常時なら電池とプライバシーの影響が桁違いになる。
 - **録音を止める条件**。通話終了で止めるか、一定時間で必ず止めるか。止め忘れは最悪の事故になる。
 - `AudioRecord` を `setPrivacySensitive(true)` にするか。true にすると他アプリ（アシスタント含む）に
