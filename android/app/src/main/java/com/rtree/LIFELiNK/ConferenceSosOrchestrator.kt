@@ -90,9 +90,14 @@ object ConferenceSosOrchestrator {
                 return@launch
             }
             report("Your contact answered. Merging…")
-            CallRegistry.merge(contactCall, aiCall)
+            // Telecom offers the pairing a moment after the answer, so keep asking until the merge lands.
             val merged = withTimeoutOrNull(MERGE_TIMEOUT_MS) {
-                CallRegistry.calls.first { calls -> isMerged(calls, aiCall, contactCall) }
+                while (!isMerged(CallRegistry.calls.value, aiCall, contactCall)) {
+                    CallRegistry.merge(contactCall, aiCall)
+                    withTimeoutOrNull(1_000) {
+                        CallRegistry.calls.first { calls -> isMerged(calls, aiCall, contactCall) }
+                    }
+                }
                 true
             } ?: false
             report(
