@@ -22,9 +22,9 @@
 | P0-11 | DONE | Twilio Media Streams と OpenAI Realtime bridge を実装する | P0-08、P0-10 | 2026-09-26: 159秒の実通話でStream started/stopped、受話7,931フレーム、相手発話26ターン、AI出力1,163フレームを確認。相手発話時にTwilio出力bufferをclearする割り込み処理を実装 |
 | P0-12 | DONE | 鮮度付き初回発話を実装する | P0-05、P0-11 | 物理端末で取得した都道府県と情報の鮮度を実通話の初回AI音声で再生確認。座標・精度・詳細住所は発話しない |
 | P0-13 | DONE | Android の通話中メモ・位置更新を AI へ注入する | P0-11、P0-12 | 2026-09-26: 167秒の実通話中にAndroidから追加メモを送信し、API HTTP 202、Firestore保存・AI配達時刻、受電側でのAI音声読み上げを確認。受話8,315フレーム、AI出力511フレーム、発話4ターンを記録 |
-| P0-14 | DONE | BLE Beacon 経路（専用 UUID/Major/Minor 広告、`BeaconReceiver`/Filter/PendingIntent、重複排除）を Safety gate へ接続する | P0-09 | 2026-09-26: 物理広告をcompany ID `0x004C`・iBeacon prefix `0x02 0x15`として2回観測し、実UUID/Major/Minorへ完全一致filterを更新。長押し1回から`trigger_type: ble`のeventと25秒の実通話が1件だけ発生し、後続広告は30秒窓ですべて重複抑止された |
+| P0-14 | DONE | BLE Beacon 経路を Safety gate へ接続する（旧 Beacon0 トリガーは P0-14a で修正済み） | P0-09 | 2026-09-26: 物理広告から `trigger_type: ble` のイベントと 25 秒の実通話を確認。ただし後の実測で Beacon0 は待機広告と判明したため、この通話だけでは長押し検証完了とはみなさない。修正後の実機確認は P0-14a |
 | P0-14a | IN PROGRESS | ＋Beaconのボタン1/2・短押し/長押しと広告UUID/Major/Minorの対応をドライランで実測し、発信トリガーにする識別値を確定する | P0-14 | 2026-09-26: 実測で Beacon0=待機、Beacon1/2=ボタン1/2、Major bit14=長押しと確定（`doc/plan.md` 6b 章）。旧トリガーが待機広告だった不具合を修正し、長押し bit のみで発信候補にする実装を Samsung 実機へ導入済み。残り: ドライランで短押し→候補なし・長押し→候補1回を実機確認し、その後ドライランOFFで実通話1回を再確認 |
-| P0-15 | TODO | MVP の失敗系と縦断フローを実端末で確認する | P0-10〜P0-14 | 権限拒否・通信断・外部 API 障害で二重発信せず、実通話証跡あり |
+| P0-15 | TODO | 電話・修正後の iBeacon 連動を含む MVP の失敗系と縦断フローを実端末で確認する | P0-10〜P0-14a | P0-14a の短押し/待機では発信 0、長押しで実通話 1 回の証跡があり、権限拒否・通信断・外部 API 障害でも二重発信しない。Discord 着手のゲート |
 
 注記(2026-09-26、解消済み): `requireHumanVerification` が要求する `human_verified` custom claimはWorld ID proof成功後に設定され、物理端末で発信認可へ利用できる状態を確認済み。
 
@@ -46,18 +46,22 @@
 
 ## P1: 実通話成立後
 
-**2026-09-26 方針（確定・改訂）**: P0-15 が通り次第フル実装へ進む。残り約 12 時間という制約を踏まえ、**モックを作らず常に本物のスキーマ・本物のデータに対して実装を積み重ねる**ことを最優先原則にする（`doc/plan.md` 3 章「主線完了後の実装順序」参照）。そのため P2 を「全部作り切ってから UI に着手」という逐次実行はせず、**P2-01/P2-02（`facts`/`state/current`/`timeline` の最小の書き込みパス）だけを先に固め、そこから Android の Full UI と P2 の残り（`delegationStore.ts`/`responsesDelegate.ts`/`realtimeTools.ts`/`realtimeBridge.ts`）を並行トラックで進める**。UI は `timeline.kind: delegation_status` を含む汎用スキーマを最初から読むため、delegations が後から実装されても UI 側の変更は不要。P0 の `emergency_events`/`updates` の既存テストデータは移行しない（新規イベントから P2 スキーマを使う）。**残り時間の半分（6 時間経過時点）でチェックポイント**を置き、P2 最小パス + Full UI が本物のデータで繋がっていなければ即座に delegations 等を切り捨てて動く縦断フローを固定する。2026-09-26: `doc/plan.md` 8a 章の型を厳密化（`facts.value` の kind 別 shape、`state/current.active_alerts`、`delegations.result` の型）し、想定クエリ（owner_uid/participant_uids × 日時ソート）向けの Firestore 複合インデックスを `firestore.indexes.json` に追加して `firebase deploy --only firestore:indexes,firestore:rules` で反映済み。これにより P2 のスキーマは「以後変更しない」ものとして凍結した。
+**2026-09-26 優先順位更新**: **P0-14a と P0-15 の実機完了 → Discord 個別 DM の実アカウント縦断検証（P1-01a〜P1-01f）→ P2 最小書き込みパス（P2-01/P2-02）→ Full UI と delegations を並行**。Discord 検証は既存の本物の `emergency_events`/`updates` を使い、P2 の完成を待たず、モックも作らない。P2 のスキーマが変更になる場合はコードより先に `doc/plan.md` を更新。電話/iBeacon 検証が終わる前に Bot DM 送信はしない。Discord が相手の同意や DM 配信条件で詰まれば失敗を記録し、電話+iBeacon の動く主線を守る。
 
 | ID | 状態 | タスク | 依存 | 完了条件 |
 | --- | --- | --- | --- | --- |
-| P1-01 | TODO | フル UI モックの残る未決 2 論点（`doc/plan.md` 4a 章、論点 1（警察自動通報の文言）は 2026-09-26 に人間が「登録済み緊急連絡先に限定し、警察を目標にしない」と決定済み）を確定する: (1) 通話録音・書き起こしを友人へ共有するか、(2) 友人共有 UI をアプリ内自作（Option A）にするか実 Discord bot（Option B）にするか。**2026-09-26 追記**: P0.5-09 のユースケース精査で、実際は Option A/B の二択ではなく「Discord identity」と「LIFELiNK Google アカウント」の両方の友人リンク手段を同時サポートする前提だと判明。次回の API/データ設計見直しで「両方サポートする前提でどちらから実装するか」に決定の枠組みを直す | P0-15 | 決定を `doc/plan.md` 4a 章・1a 章に反映済み |
-| P1-01a | TODO | Discord 個別連絡先方式の可否を決定する（4a 章の候補設計）。電話先と DM 受信者の関係・人数・通知同意・返信の AI 注入有無・Social SDK 申請要否を確定する | P1-01、受信者の事前同意 | 友人一覧に通常 OAuth ではアクセスできない制約を踏まえ、招待・本人確認・公開範囲・フォールバックを合意して `doc/plan.md` に記録 |
-| P1-01b | TODO | P1-01a で Discord 個別連絡を選んだ場合、招待→受信者 opt-in→Bot テスト DM→モーダル返信→`updates` 保存の最小縦断フローを実装・実測する | P1-01a、P0-15 | 事前同意済みの相手で配送成功/失敗が区別され、返信が許可したイベントに一回だけ記録される。電話発信は Discord 障害でも継続する |
-| P1-02 | TODO | `friend_links` コレクションと招待コード発行・承認 API（`/v1/friends/*`）を実装する（P1-01 で Option A を選んだ場合） | P2-01/P2-02完了（最小パス、delegationsは不要）、P0.5-01、P1-01 | 相互承認済みの友人一覧が取得でき、`pending`/`accepted`/`blocked` を切り替えられる |
+| P1-01 | TODO | 後続の録音/書き起こし共有と LIFELiNK 同士の Google/Firebase uid 友人リンク・アプリ内 UI の詳細を決定する。Discord 個別 DM 先行、両方式の最終サポートは決定済み | P1-01f | 二者択一の Option A/B 前提を解消し、後続の公開範囲と実装順を `doc/plan.md` に記録 |
+| P1-01a | DONE | Discord の個別 DM を電話/iBeacon の実機検証後、他の P1/P2 より先に縦断検証する優先順位を決める | 人間の判断 | 2026-09-26 決定。1 人の別支援者への任意通知・都道府県のみ・返信は参考保存・Social SDK 非依存を初回検証の既定とし、追加共有は別途決定 |
+| P1-01b | TODO | Discord Developer Portal の Bot/Interactions と Cloud Run の Secret Manager 設定、招待・連絡先・通知配送の実 Firestore スキーマ/API 境界を先に確定する | P0-14a、P0-15、P1-01a | 本物のデータ構造・権限/期限/取り消し・Discord 署名/トークン/429/重複防止契約を `doc/plan.md` に凍結。秘密値はドキュメントやログに出さない |
+| P1-01c | TODO | 発信者がアプリから招待を作成し、受信者が Discord 本人確認・通知/都道府県共有の明示同意を経て承認済み連絡先に表示され、解除できるフローを実装する | P1-01b、受信者の同意 | Firebase UID と Discord user ID の本人確認付きリンクが成立し、期限切れ/再使用/なりすましが拒否される。Discord 全友人一覧やサーバー参加だけを承認扱いにしない |
+| P1-01d | TODO | 承認した本人に Bot テスト DM を送りボタン応答で到達を検証する | P1-01c | 実 Discord アカウントで受信/応答を確認。送信失敗・プライバシー設定・未着を成功扱いにせず、連絡先に状態を表示 |
+| P1-01e | TODO | 実際の新規電話イベント発生時に選択済み受信者へ独立した Discord DM を試み、署名検証済み Interaction のボタン→モーダル返信を対象イベントの `updates` に一度だけ保存する | P1-01d、P0-15 | 実イベントと返信の照合・受信者認可・配送状態/重複排除を確認。送信失敗でも電話は継続し、GPS 座標・詳細住所は送らず、返信を無断で AI に注入しない |
+| P1-01f | TODO | 電話+iBeacon+Discord の縦断フローを同意済み実機/実アカウントで再確認する | P1-01e | 1 回の長押しで電話 1 回/DM 1 回、受信者の返信が同じイベントに 1 件、再送で重複なし。DM 不達/Discord 障害でも電話成功を確認し証跡を残す |
+| P1-02 | TODO | `friend_links` コレクションと招待コード発行・承認 API（`/v1/friends/*`）を Discord と並存する後続の LIFELiNK 同士の友人リンクとして実装する | P1-01f、P2-01/P2-02、P1-01 | 相互承認済みの友人一覧が取得でき、`pending`/`accepted`/`blocked` を切り替えられる。メールの手入力だけで本人確定しない |
 | P1-03 | TODO | `emergencySessions.participant_uids` の友人招待時のスナップショット反映を `friend_links` と結び付けて実装する（P2-01 ですでに作った rules/スナップショットロジックを `friend_links` の承認状態と接続するだけでよい。旧 `emergency_events` 向けの作業は不要） | P1-02 | イベント作成時点の友人だけが該当 `emergencySessions` を読み取れ、後から友人になった uid はアクセスできないことを確認 |
 | P1-04 | TODO | `timeline`（+ 必要なら `facts`）へ `friend_comment` 種類のレコードを書き込む処理を実装する（P2-02 で実装済みの `timelineStore.ts` を利用。入力音声 transcription は P2-02 の `transcript_ai`/`transcript_contact` として既に履歴化されている前提） | P1-03、P2-02 | 通話中の両者の発話と友人コメントが同一 `timeline` に時系列で保存される |
 | P1-05 | TODO | 友人コメントを `realtimeBridge.ts`（P2-05）経由で進行中の Realtime セッションへ注入する | P1-04、P2-05 | 通話を切らずに友人コメントの内容が相手へ音声で伝わる |
-| P1-06 | TODO | 友人共有 UI を実装する（Option A: アプリ内 Discord 風画面 / Option B: 実 Discord bot 連携。P1-01 の決定に従う。`facts`/`timeline` を直接読む。delegations は後から書き込まれても同じ画面で表示できるので待たない） | P2-01/P2-02完了（最小パス）、P1-01、P1-02〜P1-05（Option A）または Discord bot 基盤構築（Option B） | 自分と共有されたイベントを時系列表示し、通話中にコメント投稿できる。Option B の場合はアプリ未インストールの友人が Discord だけで受信・返信できる |
+| P1-06 | TODO | P2 の本物の `facts`/`timeline` を直接読むアプリ内の共有 UI を実装する。Discord だけの受信者は既に P1-01f で DM/返信を検証済み | P2-01/P2-02、P1-02〜P1-04 | LIFELiNK 同士の友人が承認済みイベントを閲覧・返信でき、Discord 利用者はアプリ未インストールでも DM で受信・返信できる。未完成 UI は「準備中」と表示 |
 | P1-06a | TODO | `users/{uid}` へ `nickname`/`area` フィールドを追加し、プロフィール設定画面（モック 1-5）を実装する | P0-15 | ニックネームとエリアを保存・再取得でき、エリアを住所表示や連絡先の文脈情報に利用できる |
 | P1-06b | TODO | 端末ローカルの 2 段階音声アナウンス（送信時 stage1・接続時 stage2、JP/EN/両方、Silent SOS トグル）を実装する | P0-09、P0-13（`in-progress`/`answered` を判定する Twilio status） | 送信直後に stage1 が即時発話され、Twilio status が `answered`/`in-progress` を報告した時だけ stage2 が発話される。Silent SOS 有効時は両方無音になる |
 | P1-07 | TODO | Android 周辺音声の扱いを設計・実装する | P0-15、同意・法務判断 | 明示同意と状態表示のもとで音声を通話へ追加可能 |
@@ -72,11 +76,11 @@
 
 ## P2: GPT Live 状況ストアと Responses delegation
 
-`doc/plan.md` 8a 章の設計に対応する実装タスク。**2026-09-26 確定: P0-15 の直後、P1 のフル UI より先に、`delegations` を含むフルセットで着手する**（部分実装ではない）。`doc/plan.md` 3 章「主線完了後の実装順序」参照。既存 `emergency_events`/`updates` の実機テストデータは移行しない（新規イベントから `emergencySessions` 系スキーマを使う）。
+`doc/plan.md` 8a 章の設計に対応する実装タスク。**2026-09-26 優先順位更新: 電話+iBeacon 検証 → Discord 個別連絡の実アカウント縦断検証 → P2 最小パス → Full UI と delegations を並行**。Discord の初回実測には既存の `emergency_events`/`updates` を用い、P2 が出来上がるまで待たない。既存テストデータは移行せず、P2 着手後の新規イベントから `emergencySessions` を使う。
 
 | ID | 状態 | タスク | 依存 | 完了条件 |
 | --- | --- | --- | --- | --- |
-| P2-01 | TODO | `situationStore.ts`: `facts` の append・`state/current` の materialization・`sequence` 採番・認可を実装する（ルート直下の `emergencySessions/{session_id}` 配下、2026-09-26 にネスト案からルート直下に差し戻し済み。`participant_uids` のスナップショット生成はこのタスク自体で実装し、P1-02（`friend_links`）の完成を待たない） | P0-15 | Android fact が一度だけ保存され、`state/current` の `version` が単調増加する |
+| P2-01 | TODO | `situationStore.ts`: `facts` の append・`state/current` の materialization・`sequence` 採番・認可を実装する（ルート直下の `emergencySessions/{session_id}` 配下。`participant_uids` のスナップショット生成はこのタスク自体で実装し、P1-02 を待たない）。Discord 返信の `friend_reply` 移行先も確認する | P1-01f | Android/Discord の fact が一度だけ保存され、`state/current` の `version` が単調増加する |
 | P2-02 | TODO | `timelineStore.ts`: `timeline` への transcript/UI 履歴書き込みを実装する（8a 章の `delivery` 状態遷移を含む） | P2-01 | 割り込み時に `conversation.item.truncate` と連動して `interrupted` が記録される |
 | P2-03 | TODO | `realtimeTools.ts`: `get_current_situation`/`get_session_history` の同期 tool と routing 規則を実装する | P2-01、P2-02 | 「今どこ」「さっき何と言ったか」に根拠 `fact_id` 付きで即答できる |
 | P2-04 | TODO | `delegationStore.ts` + `responsesDelegate.ts`: `delegate_investigation` の非同期委譲（`background: true`、poll、`call_id` 冪等化）を実装する | P2-03 | 保留発話が一回だけ発話され、Responses 完了後に同じ通話へ結果が音声で返る |
@@ -85,9 +89,9 @@
 
 ## 次のアクション
 
-Google provider、OAuth client、Twilio account、発信番号、OpenAI Secret、Cloud Run音声bridgeは構成済み。2026-09-25 にTwilio(`status: active`/`type: Full`)とGoogle provider(`enabled: true`)を Secret Manager 経由のAPI呼び出しで実測確認済み。主線の外部ボトルネックはテスト受電番号の受電者からの事前同意である。2026-09-26: GCP billing budgets（Monthly 2,000円/2nd limit 20,000円/Alert 10,000円、billing account 全体に適用）が既に設定済みであることを確認し、Twilio/OpenAI Realtimeの誤課金に対する安全網はすでにあると判断した（追加設定は不要）。
+Google ログイン、World ID、同意済み番号への AI 双方向電話・通話中メモは実機確認済み。残る最優先の検証は Beacon0 待機広告をトリガーから除いた修正後の iBeacon 長押し→実通話と失敗系（P0-14a/P0-15）。Discord 個別連絡に用いる Bot・受信者の本人同意・テスト DM はまだ未実施。
 
-1. 物理端末でP0-05（位置保存）、P0-06（連絡先登録）、P0-09（Safety gate）を確認する。
-2. 同意済みテスト受電番号をアプリへ登録し、P0-10〜P0-13の実通話を縦断確認する。
-3. 物理Beacon長押しでP0-14の一回性を確認する。
-4. GATT（P1-08〜P1-15）は Beacon（P0-14）が主線完了後に完動してから着手する。着手前に P1-08 の決定事項を先に固める。
+1. P0-14a: ドライランで待機/短押し 0・長押し 1 を確認し、ドライラン OFF で iBeacon 長押し 1 回→電話 1 回を再確認する。
+2. P0-15: 電話/BLE の失敗系を確認し、実機検証のゲートを閉じる。
+3. **次の主線** P1-01b〜P1-01f: データ契約→招待・受信同意→Bot テスト DM→電話と同時 DM→返信の実データ保存を実 Discord アカウントで検証する。
+4. 成功後に P2 最小パスと Full UI へ進む。Google 同士の友人リンク、AI への返信注入、GATT、録音は後続とする。
