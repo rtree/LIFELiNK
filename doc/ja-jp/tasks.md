@@ -12,6 +12,7 @@
 | --- | --- | --- | --- | --- |
 | WEB-01 | DONE | 既存 web デザインの APK リンクと公開用説明を配布ガイドに合わせる | HowToUse.md | 2026-09-27: 2 個のリンク一致と APK 最終 HTTP 200、プレビュー表示・安全注意・設定ガイドを確認 |
 | WEB-02 | DONE | 専用 Cloud Run へ静的サイト公開、ハッシュ形式 URL を案内 | WEB-01 | 2026-09-27: HTTPS/CSS/JS 200・バイト一致、幅1440/390/360・メニューとプレビュー確認、ID/番号のない共有URL、専用SA、max=1。既存backend正常。手順と検証: `doc/ja-jp/web-distribution.md` |
+| WEB-03 | DONE | Five steps セクション末尾にユーザー指定 Drive 動画を埋め込む | WEB-02 | 2026-09-27: 16:9 iframe・直接視聴リンク追加、rev 00002-2sj 公開。PC/モバイル幅・Driveプレビュー表示確認。自動操作による再生完了確認は未実施 |
 
 ## P0: MVP 主線（電話・iBeacon の実通話は完了、Discord 個別連絡は次の未完了区間）
 
