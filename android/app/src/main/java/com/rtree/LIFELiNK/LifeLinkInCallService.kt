@@ -40,7 +40,7 @@ class LifeLinkInCallService : InCallService() {
     override fun onCallAdded(call: Call) {
         CallRegistry.add(call)
         CallRegistry.setCanAddCall(canAddCall())
-        if (CallRegistry.callState(call) != Call.STATE_RINGING) {
+        if (CallRegistry.callState(call) != Call.STATE_RINGING && !ConferenceSosOrchestrator.discreet) {
             startActivity(InCallActivity.intent(this))
         }
     }

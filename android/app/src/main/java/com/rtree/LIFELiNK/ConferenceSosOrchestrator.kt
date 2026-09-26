@@ -1,6 +1,8 @@
 package com.rtree.LIFELiNK
 
 import android.content.Context
+import android.media.AudioManager
+import android.os.Build
 import android.telecom.Call
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
@@ -36,6 +38,11 @@ object ConferenceSosOrchestrator {
     val running: Boolean
         get() = job?.isActive == true
 
+    /** True while a conference SOS owns the calls; the phone should not light up or make noise. */
+    @Volatile
+    var discreet: Boolean = false
+        private set
+
     fun start(
         context: Context,
         apiClient: LifeLinkApiClient,
@@ -54,58 +61,97 @@ object ConferenceSosOrchestrator {
             return false
         }
         report("Calling the AI…")
+        discreet = true
         job = scope.launch {
-            val aiCall = awaitCall(aiNumber, CALL_START_TIMEOUT_MS)
-            if (aiCall == null) {
-                report("The call to the AI did not start")
-                return@launch
+            val audio = appContext.getSystemService(AudioManager::class.java)
+            val previousVolume = audio.getStreamVolume(AudioManager.STREAM_VOICE_CALL)
+            // The caller may be hiding: keep the mic open but make the phone itself as quiet as possible.
+            val quietKeeper = launch {
+                CallRegistry.setMuted(false)
+                CallRegistry.calls.collect { keepQuiet(audio) }
             }
-            if (!awaitAiJoined(apiClient, eventId, aiCall)) {
-                report("The AI did not join. Stay on the line or call your contact yourself.")
-                return@launch
+            try {
+                runSequence(appContext, apiClient, eventId, aiNumber, joinCode, contactPhone)
+                CallRegistry.calls.first { calls -> calls.none { it.state != Call.STATE_DISCONNECTED } }
+            } finally {
+                quietKeeper.cancel()
+                runCatching { audio.setStreamVolume(AudioManager.STREAM_VOICE_CALL, previousVolume, 0) }
+                discreet = false
             }
-            report("The AI joined. Calling your contact…")
-            if (!placeCall(appContext, contactPhone)) {
-                report("Could not call your contact")
-                return@launch
-            }
-            val contactCall = awaitCall(contactPhone, CALL_START_TIMEOUT_MS)
-            if (contactCall == null) {
-                report("The call to your contact did not start")
-                aiCall.unhold()
-                return@launch
-            }
-            val answered = withTimeoutOrNull(CONTACT_RING_TIMEOUT_MS) {
-                CallRegistry.calls.first { calls ->
-                    val state = calls.firstOrNull { it.call == contactCall }?.state ?: Call.STATE_DISCONNECTED
-                    state == Call.STATE_ACTIVE || state == Call.STATE_DISCONNECTED
-                }
-                CallRegistry.callState(contactCall) == Call.STATE_ACTIVE
-            } ?: false
-            if (!answered) {
-                report("Your contact did not answer. Back with the AI.")
-                contactCall.disconnect()
-                delay(1_000)
-                aiCall.unhold()
-                return@launch
-            }
-            report("Your contact answered. Merging…")
-            // Telecom offers the pairing a moment after the answer, so keep asking until the merge lands.
-            val merged = withTimeoutOrNull(MERGE_TIMEOUT_MS) {
-                while (!isMerged(CallRegistry.calls.value, aiCall, contactCall)) {
-                    CallRegistry.merge(contactCall, aiCall)
-                    withTimeoutOrNull(1_000) {
-                        CallRegistry.calls.first { calls -> isMerged(calls, aiCall, contactCall) }
-                    }
-                }
-                true
-            } ?: false
-            report(
-                if (merged) "You, your contact, and the AI are on one call"
-                else "Could not merge automatically. Tap Merge.",
-            )
         }
         return true
+    }
+
+    private fun keepQuiet(audio: AudioManager) {
+        if (CallRegistry.speaker.value) CallRegistry.setSpeaker(false)
+        val min = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            audio.getStreamMinVolume(AudioManager.STREAM_VOICE_CALL)
+        } else {
+            1
+        }
+        if (audio.getStreamVolume(AudioManager.STREAM_VOICE_CALL) != min) {
+            runCatching { audio.setStreamVolume(AudioManager.STREAM_VOICE_CALL, min, 0) }
+                .onFailure { Log.w(TAG, "Could not lower the call volume", it) }
+        }
+    }
+
+    private suspend fun runSequence(
+        appContext: Context,
+        apiClient: LifeLinkApiClient,
+        eventId: String,
+        aiNumber: String,
+        joinCode: String,
+        contactPhone: String,
+    ) {
+        val aiCall = awaitCall(aiNumber, CALL_START_TIMEOUT_MS)
+        if (aiCall == null) {
+            report("The call to the AI did not start")
+            return
+        }
+        if (!awaitAiJoined(apiClient, eventId, aiCall)) {
+            report("The AI did not join. Stay on the line or call your contact yourself.")
+            return
+        }
+        report("The AI joined. Calling your contact…")
+        if (!placeCall(appContext, contactPhone)) {
+            report("Could not call your contact")
+            return
+        }
+        val contactCall = awaitCall(contactPhone, CALL_START_TIMEOUT_MS)
+        if (contactCall == null) {
+            report("The call to your contact did not start")
+            aiCall.unhold()
+            return
+        }
+        val answered = withTimeoutOrNull(CONTACT_RING_TIMEOUT_MS) {
+            CallRegistry.calls.first { calls ->
+                val state = calls.firstOrNull { it.call == contactCall }?.state ?: Call.STATE_DISCONNECTED
+                state == Call.STATE_ACTIVE || state == Call.STATE_DISCONNECTED
+            }
+            CallRegistry.callState(contactCall) == Call.STATE_ACTIVE
+        } ?: false
+        if (!answered) {
+            report("Your contact did not answer. Back with the AI.")
+            contactCall.disconnect()
+            delay(1_000)
+            aiCall.unhold()
+            return
+        }
+        report("Your contact answered. Merging…")
+        // Telecom offers the pairing a moment after the answer, so keep asking until the merge lands.
+        val merged = withTimeoutOrNull(MERGE_TIMEOUT_MS) {
+            while (!isMerged(CallRegistry.calls.value, aiCall, contactCall)) {
+                CallRegistry.merge(contactCall, aiCall)
+                withTimeoutOrNull(1_000) {
+                    CallRegistry.calls.first { calls -> isMerged(calls, aiCall, contactCall) }
+                }
+            }
+            true
+        } ?: false
+        report(
+            if (merged) "You, your contact, and the AI are on one call"
+            else "Could not merge automatically. Tap Merge.",
+        )
     }
 
     // IMS replaces both calls with a new conference call instead of parenting them.
