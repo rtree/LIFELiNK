@@ -42,6 +42,38 @@ The user signs in with Google via Firebase Authentication. This identifies an ap
 
 The stored action/nullifier association stops the same human proof from being bound to a *different* Firebase account; verification again on the same account is supported. This is **onboarding-time Sybil resistance**, not a per-call proof, rate limiter, or guarantee against every form of nuisance calling. The user's UID is the proof's signal, so this implementation deliberately binds verification to an app account without asking World ID for the user's name.
 
+#### Where the proof goes: World App never hands it back to our APK
+
+World App is a separate app, so there is no app-to-app return value. The proof travels through World's encrypted **Bridge** relay, and the only party that receives it is our backend:
+
+```mermaid
+sequenceDiagram
+    participant A as LIFELiNK (Android)
+    participant B as Cloud Run backend
+    participant W as World App
+    participant R as World Bridge
+    participant V as World v4 verifier
+    A->>B: POST /v1/world-id/start (Firebase ID token)
+    B->>B: RP-sign request, IDKit.request(proofOfHuman, signal = UID)
+    B-->>A: flow_id + connector URI (bridge endpoint + one-time key)
+    A->>W: open connector URI (Android Intent)
+    W->>W: user approves, zero-knowledge proof generated on device
+    W->>R: encrypted proof
+    loop Android polls our backend, never the Bridge
+        A->>B: GET /v1/world-id/status/:flowId
+        B->>R: pollOnce()
+    end
+    R-->>B: proof (decrypted with the flow key)
+    B->>V: POST /api/v4/verify/{rp_id}
+    V-->>B: valid / invalid
+    B->>B: bind nullifier to UID (Firestore txn), set human_verified claim
+    B-->>A: verified
+```
+
+**How a proof becomes "this Google account is human" without a wallet.** Three independent links tie the proof to one Firebase account: the UID is the proof's **signal**; the pending flow is stored server-side under the UID that started it, and `/status` refuses any other token; and the **nullifier**, which is the same for one human and one action, is stored in `world_id_nullifiers` against that UID, so a second account that presents the same human gets a 409. The result lives in a Firebase custom claim, not on a chain. The user never needs a wallet, gas, or a transaction. The only on-chain artifact is our RP registration, which the World Developer Portal manages for us.
+
+**Why World's verification API instead of an on-chain verifier.** An on-chain verifier contract would check the same zero-knowledge proof against World's identity set, but the root of trust would not change: in either case we rely on World's credential issuance. For Proof of Human, that means World's Orb enrollment, which no contract can re-examine. Given that trust is already delegated to World, also trusting World's v4 verification API adds little risk. It also removes wallet management, gas, and chain latency from an emergency app whose users are not crypto users. What we *do* keep under our own control is everything app-specific: RP request signing with a server-only key (held in Secret Manager), environment and action checks, one-human-one-account binding via the nullifier, and a server-side claim check before any call is placed. If a public, independently auditable verification record ever becomes a requirement, only the verifier step needs to move on-chain.
+
 ### 2. A press becomes one emergency event
 
 Users register a phone number in E.164 format and link a specific physical +Beacon on their own device. The on-screen SOS requires **three taps or a two-second hold** to reduce accidental activation; a linked BLE button uses a long-press advertisement. Short presses and idle advertisements must not trigger a call. Both paths feed the same Android Safety gate, which keeps a stable event UUID across retries. On the backend, a Firestore transaction checks the event ID and ownership: a retry returns the existing result instead of placing a second call.
@@ -142,6 +174,7 @@ The [ETHGlobal Tokyo 2026 World prize](https://ethglobal.com/events/tokyo2026/pr
 | Why is a human credential necessary? | Google login can be multiplied cheaply; a uniqueness gate raises the barrier to farming costly phone/AI resources with many accounts. It does **not** by itself prevent every nuisance call. |
 | Why Proof of Human rather than Passport/NFC or Selfie Check? | This gate needs to know **unique human**, not legal identity, nationality, age, or document ownership. Adding credentials simply for the sake of collecting them would be a worse product decision. |
 | What is actually verified? | The backend signs the RP request, verifies the returned IDKit result with World's v4 verifier, binds the nullifier to one Firebase UID in a transaction, then sets `human_verified`. The emergency endpoint checks the claim server-side. |
+| Why no smart contract or wallet? | An on-chain verifier would still trust World's Orb-backed issuance; the root of trust is the same. We therefore use World's v4 verifier and keep the app-specific controls (RP signing, action check, nullifier-to-UID binding, server-side claim gate) in our own backend. Users need no wallet or gas. |
 | What if it fails? | No successful new proof means no new claim; unverified SOS requests return 403 before event creation or Twilio. The UI exposes expired and failed flow states. |
 | What was tested? | A real Android device and World App completed Proof of Human in production; the app showed verified state and the human-gated telephone flow ran on a physical device. This is **not** a World ID for Agents integration, a passport proof, or a Mini App. |
 
