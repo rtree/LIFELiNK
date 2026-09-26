@@ -86,7 +86,7 @@ object BeaconTriggerManager {
         val callback = object : ScanCallback() {
             override fun onScanResult(callbackType: Int, result: ScanResult) {
                 AdvertisementRegistry.observe(context, result)
-                if (!isTriggerAdvertisement(context, result)) return
+                if (!isLinkedAdvertisement(context, result)) return
                 context.sendBroadcast(
                     Intent(context, BeaconReceiver::class.java)
                         .setAction(ACTION_BEACON_RESULT)
@@ -113,19 +113,18 @@ object BeaconTriggerManager {
         )
     }
 
-    // Each linked slot matches only when Major bit14 (long press) is set; bit15 (battery low) is ignored.
+    // Linked slots in any state (bit14 long press / bit15 battery ignored) so the receiver can see state transitions.
     private fun buildFilters(context: Context): List<ScanFilter> =
         linkedSlots(context).map { slot ->
-            val major = slot.major or 0x4000
             val data = byteArrayOf(0x02, 0x15) +
                 uuidBytes(slot.uuid) +
                 byteArrayOf(
-                    (major shr 8).toByte(),
-                    major.toByte(),
+                    (slot.major shr 8).toByte(),
+                    slot.major.toByte(),
                     (slot.minor shr 8).toByte(),
                     slot.minor.toByte(),
                 )
-            val mask = ByteArray(data.size) { 0xff.toByte() }.also { it[18] = 0x7f }
+            val mask = ByteArray(data.size) { 0xff.toByte() }.also { it[18] = 0x3f }
             ScanFilter.Builder()
                 .setManufacturerData(APPLE_COMPANY_ID, data, mask)
                 .build()
@@ -137,9 +136,9 @@ object BeaconTriggerManager {
             ?.beaconSlots
             .orEmpty()
 
-    fun isTriggerAdvertisement(context: Context, result: ScanResult): Boolean {
+    fun isLinkedAdvertisement(context: Context, result: ScanResult): Boolean {
         val identity = AdvertisementRegistry.parseIBeacon(result) ?: return false
-        return identity.longPress && identity.slot in linkedSlots(context)
+        return identity.slot in linkedSlots(context)
     }
 
     private fun pendingIntent(context: Context): PendingIntent = PendingIntent.getBroadcast(
@@ -167,41 +166,54 @@ class BeaconReceiver : BroadcastReceiver() {
         val path = intent.getStringExtra(BeaconTriggerManager.EXTRA_PATH)
             ?: BeaconTriggerManager.PATH_PENDING_INTENT
         val matched = scanResults(intent)
-            .filter { BeaconTriggerManager.isTriggerAdvertisement(context, it) }
+            .filter { BeaconTriggerManager.isLinkedAdvertisement(context, it) }
         if (matched.isEmpty()) return
         val fresh = matched.filter {
             AdvertisementRegistry.packetAgeMillis(it) <= MAX_ADVERTISEMENT_AGE_MS
         }
         if (fresh.isEmpty()) {
             AdvertisementRegistry.appendBeaconLog(
-                "長押し破棄(古い) [$path] 最新遅延=${matched.minOf(AdvertisementRegistry::packetAgeMillis)}ms " +
+                "破棄(古い) [$path] 最新遅延=${matched.minOf(AdvertisementRegistry::packetAgeMillis)}ms " +
                     "件数=${matched.size} ${AdvertisementRegistry.screenState(context)}",
             )
             return
         }
-        val packet = fresh.maxBy { it.timestampNanos }
-        Log.i(
-            LOG_TAG,
-            "long-press pkt path=$path age=${AdvertisementRegistry.packetAgeMillis(packet)}ms rssi=${packet.rssi}",
-        )
+        val safetyGate = EmergencySafetyGate(context)
+        var pressed: Pair<ScanResult, String>? = null
+        fresh.sortedBy { it.timestampNanos }.forEach { packet ->
+            val identity = AdvertisementRegistry.parseIBeacon(packet) ?: return@forEach
+            val reason = safetyGate.observeBeaconState(
+                stateKey = "${identity.slot.label}|${identity.longPress}",
+                longPress = identity.longPress,
+                packetAtMillis = AdvertisementRegistry.packetWallMillis(packet),
+            )
+            if (identity.longPress) {
+                Log.i(
+                    LOG_TAG,
+                    "long-press pkt path=$path age=${AdvertisementRegistry.packetAgeMillis(packet)}ms " +
+                        "rssi=${packet.rssi} event=${reason ?: "none"}",
+                )
+            }
+            if (reason != null) pressed = packet to reason
+        }
+        val (packet, reason) = pressed ?: return
 
         val pendingResult = goAsync()
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             try {
-                dispatchBeacon(context.applicationContext, path, packet)
+                dispatchBeacon(context.applicationContext, path, packet, reason)
             } finally {
                 pendingResult.finish()
             }
         }
     }
 
-    private suspend fun dispatchBeacon(context: Context, path: String, packet: ScanResult) {
+    private suspend fun dispatchBeacon(context: Context, path: String, packet: ScanResult, reason: String) {
         val safetyGate = EmergencySafetyGate(context)
-        if (!safetyGate.acceptBeaconBurst()) return
         val packetAt = AdvertisementRegistry.packetWallMillis(packet)
         val identity = AdvertisementRegistry.parseIBeacon(packet)
         AdvertisementRegistry.appendBeaconLog(
-            "長押し受理 [$path] [${AdvertisementRegistry.deviceLabel(runCatching { packet.device.address }.getOrNull())}] " +
+            "長押し受理($reason) [$path] [${AdvertisementRegistry.deviceLabel(runCatching { packet.device.address }.getOrNull())}] " +
                 "${identity?.slot?.label} pkt=${formatLogTime(packetAt)} " +
                 "受信遅延=${AdvertisementRegistry.packetAgeMillis(packet)}ms RSSI=${packet.rssi} " +
                 AdvertisementRegistry.screenState(context),

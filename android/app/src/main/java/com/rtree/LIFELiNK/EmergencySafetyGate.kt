@@ -41,17 +41,29 @@ class EmergencySafetyGate(context: Context) {
             .apply()
     }
 
+    // Returns the press reason when a long-press packet starts a new press, or null otherwise.
     @Synchronized
-    fun acceptBeaconBurst(nowMillis: Long = System.currentTimeMillis()): Boolean {
-        val previous = preferences.getLong(LAST_BEACON_SEEN_AT, 0L)
-        preferences.edit().putLong(LAST_BEACON_SEEN_AT, nowMillis).apply()
-        return previous == 0L || nowMillis - previous > BEACON_BURST_GAP_MS
+    fun observeBeaconState(stateKey: String, longPress: Boolean, packetAtMillis: Long): String? {
+        val lastKey = preferences.getString(LAST_BEACON_STATE, null)
+        val lastAt = preferences.getLong(LAST_BEACON_SEEN_AT, 0L)
+        if (packetAtMillis < lastAt) return null
+        preferences.edit()
+            .putString(LAST_BEACON_STATE, stateKey)
+            .putLong(LAST_BEACON_SEEN_AT, packetAtMillis)
+            .apply()
+        if (!longPress) return null
+        return when {
+            lastKey != stateKey -> "状態切替"
+            packetAtMillis - lastAt > BEACON_BURST_GAP_MS -> "${BEACON_BURST_GAP_MS / 1000}秒ぶり"
+            else -> null
+        }
     }
 
     private companion object {
         const val ACTIVE_EVENT_ID = "active_event_id"
         const val ACTIVE_CONTACT_ID = "active_contact_id"
         const val LAST_BEACON_SEEN_AT = "last_beacon_seen_at"
+        const val LAST_BEACON_STATE = "last_beacon_state"
         const val BEACON_BURST_GAP_MS = 30_000L
     }
 }
