@@ -79,6 +79,10 @@ registerMediaBridge(app, async (eventId, callSid) => {
         longitude?: number;
         accuracy_m?: number;
         captured_at?: string;
+        battery_percent?: number | null;
+        battery_charging?: boolean | null;
+        motion_state?: string | null;
+        motion_peak_g?: number | null;
       }
     | null;
   return {
@@ -87,6 +91,10 @@ registerMediaBridge(app, async (eventId, callSid) => {
     longitude: location?.longitude ?? null,
     accuracyM: location?.accuracy_m ?? null,
     capturedAt: location?.captured_at ?? null,
+    batteryPercent: location?.battery_percent ?? null,
+    batteryCharging: location?.battery_charging ?? null,
+    motionState: location?.motion_state ?? null,
+    motionPeakG: location?.motion_peak_g ?? null,
     initialNote: (event.get("initial_note") as string | null) ?? null,
   };
 }, (eventId, speaker, text) => relayCallTranscript(db, app.log, eventId, speaker, text));
@@ -96,6 +104,13 @@ const contactSchema = z.object({
   phone: z.string().regex(/^\+[1-9]\d{7,14}$/, "phone must use E.164 format"),
 });
 
+const deviceSignalsSchema = {
+  battery_percent: z.number().int().min(0).max(100).nullish(),
+  battery_charging: z.boolean().nullish(),
+  motion_state: z.enum(["still", "moving", "shaking"]).nullish(),
+  motion_peak_g: z.number().nonnegative().nullish(),
+};
+
 const locationSchema = z.object({
   latitude: z.number().min(-90).max(90),
   longitude: z.number().min(-180).max(180),
@@ -103,16 +118,22 @@ const locationSchema = z.object({
   captured_at: z.iso.datetime(),
   address: z.string().trim().max(500).nullable(),
   geocoded_at: z.iso.datetime().nullable(),
+  ...deviceSignalsSchema,
 });
 
-// Hackathon privacy policy: GPS coordinates and accuracy are accepted from the
-// device (still useful transiently) but never written to Firestore or spoken.
-// Only the prefecture-level `address` Android already resolves is persisted.
+// Hackathon privacy policy: GPS coordinates are accepted from the device (still
+// useful transiently) but never written to Firestore. `accuracy_m` IS kept, and
+// so are battery and motion, because none of them reveal where the person is.
 function sanitizeLocationForPersistence(location: z.infer<typeof locationSchema>) {
   return {
     address: location.address,
+    accuracy_m: location.accuracy_m,
     captured_at: location.captured_at,
     geocoded_at: location.geocoded_at,
+    battery_percent: location.battery_percent ?? null,
+    battery_charging: location.battery_charging ?? null,
+    motion_state: location.motion_state ?? null,
+    motion_peak_g: location.motion_peak_g ?? null,
   };
 }
 
@@ -129,6 +150,7 @@ const emergencyEventSchema = z.object({
       captured_at: z.iso.datetime(),
       address: z.string().max(500).nullable(),
       geocoded_at: z.iso.datetime().nullable(),
+      ...deviceSignalsSchema,
     })
     .nullable(),
   initial_note: z.string().max(1000).nullable(),
@@ -151,11 +173,26 @@ function formatEmergencyUpdate(
   update: z.infer<typeof emergencyUpdateSchema>,
 ): string {
   if (update.type === "note") {
-    return `本人からの追加メモ: ${update.text}`;
+    return `A new note from the person: ${update.text}`;
   }
   const location = update.location;
-  const address = location.address ?? "住所不明";
-  return `本人の更新位置: ${address}。取得時刻${location.captured_at}`;
+  const parts = [
+    `Updated location: ${location.address ?? "unknown area"}`,
+    `accuracy about ${Math.round(location.accuracy_m)} meters`,
+    `captured at ${location.captured_at}`,
+  ];
+  if (typeof location.battery_percent === "number") {
+    parts.push(
+      `phone battery ${location.battery_percent} percent` +
+        (location.battery_charging === true ? " and charging" : ""),
+    );
+  }
+  if (location.motion_state === "shaking") {
+    parts.push("the phone is being shaken hard right now");
+  } else if (location.motion_state === "moving") {
+    parts.push("the phone is moving");
+  }
+  return `${parts.join(". ")}.`;
 }
 
 app.get("/health", async () => ({ status: "ok" }));

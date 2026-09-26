@@ -13,6 +13,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -45,6 +48,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
@@ -70,7 +75,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.repeatOnLifecycle
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -118,7 +127,8 @@ private fun SetupScreen() {
         )
     }
     var initialNote by remember { mutableStateOf("") }
-    var armedAt by remember { mutableStateOf<Long?>(null) }
+    var sosTapCount by remember { mutableStateOf(0) }
+    var sosHoldProgress by remember { mutableStateOf(0f) }
     var emergencyText by remember { mutableStateOf("Ready") }
     var activeEmergencyEventId by remember { mutableStateOf<String?>(null) }
     var beaconText by remember { mutableStateOf("Button watch is off") }
@@ -234,6 +244,83 @@ private fun SetupScreen() {
         }
     }
 
+    fun launchEmergency() {
+        val selectedContactId = contactId ?: return
+        val attempt = safetyGate.begin(selectedContactId)
+        emergencyText = if (attempt.isRetry) "Resending the same request" else "Sending your SOS"
+        scope.launch {
+            runCatching {
+                apiClient.createEmergencyEvent(
+                    eventId = attempt.eventId,
+                    contactId = selectedContactId,
+                    trigger = ScreenButtonEmergencyTrigger,
+                    location = currentLocation,
+                    initialNote = initialNote,
+                )
+            }.onSuccess { event ->
+                emergencyText = callStateText(event.state)
+                if (event.state in TERMINAL_EVENT_STATES) {
+                    safetyGate.clear(event.eventId)
+                    activeEmergencyEventId = null
+                    return@onSuccess
+                }
+                activeEmergencyEventId = event.eventId
+                while (event.state !in TERMINAL_EVENT_STATES) {
+                    delay(EVENT_STATUS_POLL_INTERVAL_MS)
+                    val latest = runCatching {
+                        apiClient.getEmergencyEvent(event.eventId)
+                    }.getOrElse { error ->
+                        emergencyText = "Checking status failed, retrying: ${error.userMessage()}"
+                        continue
+                    }
+                    emergencyText = callStateText(latest.state)
+                    if (latest.state in TERMINAL_EVENT_STATES) {
+                        safetyGate.clear(event.eventId)
+                        activeEmergencyEventId = null
+                        break
+                    }
+                }
+            }.onFailure { error ->
+                if (error is ApiException && error.statusCode in 400..499) {
+                    safetyGate.clear(attempt.eventId)
+                }
+                emergencyText = "Could not send: ${error.userMessage()}"
+            }
+        }
+    }
+
+    // Foreground-only reporting: every minute normally, every 10s while an SOS is live.
+    // Backgrounded, `getCurrentLocation` never completes, so the loop is both
+    // lifecycle-scoped and time-boxed to stop it from stalling forever.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    LaunchedEffect(signedInUid, activeEmergencyEventId) {
+        if (signedInUid == null) return@LaunchedEffect
+        val intervalMs = if (activeEmergencyEventId != null) {
+            LOCATION_INTERVAL_ACTIVE_MS
+        } else {
+            LOCATION_INTERVAL_IDLE_MS
+        }
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            MotionMonitor.start(context)
+            try {
+                while (true) {
+                    if (hasLocationPermission(context)) {
+                        withTimeoutOrNull(LOCATION_FIX_TIMEOUT_MS) { captureAndSaveLocation() }
+                    }
+                    delay(intervalMs)
+                }
+            } finally {
+                MotionMonitor.stop()
+            }
+        }
+    }
+
+    LaunchedEffect(sosTapCount) {
+        if (sosTapCount == 0) return@LaunchedEffect
+        delay(SOS_TAP_WINDOW_MS)
+        sosTapCount = 0
+    }
+
     var tab by remember { mutableStateOf(AppTab.HOME) }
     var beaconBurstSeconds by remember { mutableStateOf(emergencyPreferences.beaconBurstSeconds) }
 
@@ -286,76 +373,67 @@ private fun SetupScreen() {
                         watching = monitoringRunning,
                     )
                     Text(emergencyText, style = MaterialTheme.typography.titleMedium)
+                    val sosInteraction = remember { MutableInteractionSource() }
+                    val sosPressed by sosInteraction.collectIsPressedAsState()
+                    var longPressFired by remember { mutableStateOf(false) }
+                    LaunchedEffect(sosPressed) {
+                        if (!sosPressed) {
+                            sosHoldProgress = 0f
+                            return@LaunchedEffect
+                        }
+                        longPressFired = false
+                        val startedAt = SystemClock.elapsedRealtime()
+                        while (sosHoldProgress < 1f) {
+                            val elapsed = SystemClock.elapsedRealtime() - startedAt
+                            sosHoldProgress = (elapsed / SOS_HOLD_MS.toFloat()).coerceAtMost(1f)
+                            delay(16)
+                        }
+                        longPressFired = true
+                        sosTapCount = 0
+                        launchEmergency()
+                    }
+                    val armProgress by animateFloatAsState(
+                        targetValue = maxOf(
+                            sosTapCount.toFloat() / SOS_TAP_COUNT,
+                            sosHoldProgress,
+                        ).coerceIn(0f, 1f),
+                        label = "sosArmProgress",
+                    )
                     Button(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(96.dp),
+                            .height(120.dp),
                         enabled = contactId != null,
+                        interactionSource = sosInteraction,
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.error,
+                            containerColor = lerp(
+                                MaterialTheme.colorScheme.error,
+                                SOS_ARMED_COLOR,
+                                armProgress,
+                            ),
                             contentColor = MaterialTheme.colorScheme.onError,
                         ),
                         onClick = {
-                            val now = SystemClock.elapsedRealtime()
-                            val armed = armedAt
-                            if (armed == null || now - armed > EMERGENCY_CONFIRM_WINDOW_MS) {
-                                armedAt = now
-                                emergencyText = "Tap again within 10 seconds to send"
+                            if (longPressFired) {
+                                longPressFired = false
                                 return@Button
                             }
-
-                            armedAt = null
-                            val selectedContactId = contactId ?: return@Button
-                            val attempt = safetyGate.begin(selectedContactId)
-                            emergencyText = if (attempt.isRetry) {
-                                "Resending the same request"
+                            sosTapCount += 1
+                            if (sosTapCount >= SOS_TAP_COUNT) {
+                                sosTapCount = 0
+                                launchEmergency()
                             } else {
-                                "Sending your SOS"
-                            }
-                            scope.launch {
-                                runCatching {
-                                    apiClient.createEmergencyEvent(
-                                        eventId = attempt.eventId,
-                                        contactId = selectedContactId,
-                                        trigger = ScreenButtonEmergencyTrigger,
-                                        location = currentLocation,
-                                        initialNote = initialNote,
-                                    )
-                                }.onSuccess { event ->
-                                    emergencyText = callStateText(event.state)
-                                    if (event.state in TERMINAL_EVENT_STATES) {
-                                        safetyGate.clear(event.eventId)
-                                        activeEmergencyEventId = null
-                                        return@onSuccess
-                                    }
-                                    activeEmergencyEventId = event.eventId
-                                    while (event.state !in TERMINAL_EVENT_STATES) {
-                                        delay(EVENT_STATUS_POLL_INTERVAL_MS)
-                                        val latest = runCatching {
-                                            apiClient.getEmergencyEvent(event.eventId)
-                                        }.getOrElse { error ->
-                                            emergencyText =
-                                                "Checking status failed, retrying: ${error.userMessage()}"
-                                            continue
-                                        }
-                                        emergencyText = callStateText(latest.state)
-                                        if (latest.state in TERMINAL_EVENT_STATES) {
-                                            safetyGate.clear(event.eventId)
-                                            activeEmergencyEventId = null
-                                            break
-                                        }
-                                    }
-                                }.onFailure { error ->
-                                    if (error is ApiException && error.statusCode in 400..499) {
-                                        safetyGate.clear(attempt.eventId)
-                                    }
-                                    emergencyText = "Could not send: ${error.userMessage()}"
-                                }
+                                emergencyText =
+                                    "Tap ${SOS_TAP_COUNT - sosTapCount} more times, or hold for 2 seconds"
                             }
                         },
                     ) {
                         Text(
-                            if (armedAt == null) "SOS" else "Tap again to confirm",
+                            when {
+                                armProgress >= 1f -> "Sending"
+                                armProgress > 0f -> "Keep going"
+                                else -> "SOS"
+                            },
                             style = MaterialTheme.typography.headlineSmall,
                             fontWeight = FontWeight.Bold,
                         )
@@ -364,8 +442,9 @@ private fun SetupScreen() {
                         if (contactId == null) {
                             "Add an emergency contact in Members before you can send an SOS."
                         } else {
-                            "Tap twice. LIFELiNK calls your contact, an AI explains where you are, " +
-                                "and your Discord members get a DM at the same time."
+                            "Tap $SOS_TAP_COUNT times or hold for 2 seconds. The button darkens as it arms. " +
+                                "LIFELiNK then calls your contact, an AI explains where you are, and your " +
+                                "Discord members get a DM at the same time."
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1077,6 +1156,7 @@ private suspend fun captureLocation(context: Context): LocationSnapshot {
         ?: error("Could not get a location fix")
     val capturedAt = Instant.now().toString()
     val address = reverseGeocode(context, location.latitude, location.longitude)
+    val signals = readDeviceSignals(context)
     return LocationSnapshot(
         latitude = location.latitude,
         longitude = location.longitude,
@@ -1084,8 +1164,22 @@ private suspend fun captureLocation(context: Context): LocationSnapshot {
         capturedAt = capturedAt,
         address = address,
         geocodedAt = address?.let { Instant.now().toString() },
+        batteryPercent = signals.batteryPercent,
+        batteryCharging = signals.batteryCharging,
+        motionState = signals.motionState,
+        motionPeakG = signals.motionPeakG,
     )
 }
+
+private fun hasLocationPermission(context: Context): Boolean =
+    ContextCompat.checkSelfPermission(
+        context,
+        Manifest.permission.ACCESS_FINE_LOCATION,
+    ) == PackageManager.PERMISSION_GRANTED ||
+        ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_COARSE_LOCATION,
+        ) == PackageManager.PERMISSION_GRANTED
 
 @Suppress("DEPRECATION")
 private suspend fun reverseGeocode(
@@ -1104,8 +1198,18 @@ private suspend fun reverseGeocode(
 }
 
 // Coordinates stay on the device; only this prefecture-level text is ever shared.
-private fun LocationSnapshot.displayText(): String =
-    "${address ?: "Address unknown"}\nAccuracy %.0f m".format(accuracyMeters)
+private fun LocationSnapshot.displayText(): String = buildString {
+    append(address ?: "Address unknown")
+    append("\nAccuracy +/-%.0f m".format(accuracyMeters))
+    batteryPercent?.let { percent ->
+        append("\nBattery $percent%")
+        if (batteryCharging == true) append(" (charging)")
+    }
+    when (motionState) {
+        MotionMonitor.STATE_SHAKING -> append("\nBeing shaken hard")
+        MotionMonitor.STATE_MOVING -> append("\nMoving")
+    }
+}
 
 private fun callStateText(state: String): String = when (state) {
     "accepted" -> "SOS accepted"
@@ -1144,7 +1248,13 @@ private enum class AppTab(val label: String) {
     SETTINGS("Settings"),
 }
 
-private const val EMERGENCY_CONFIRM_WINDOW_MS = 10_000L
+private const val SOS_TAP_COUNT = 3
+private const val SOS_TAP_WINDOW_MS = 1_500L
+private const val SOS_HOLD_MS = 2_000L
+private const val LOCATION_INTERVAL_IDLE_MS = 60_000L
+private const val LOCATION_INTERVAL_ACTIVE_MS = 10_000L
+private const val LOCATION_FIX_TIMEOUT_MS = 20_000L
+private val SOS_ARMED_COLOR = Color(0xFF7A0F0A)
 private const val EVENT_STATUS_POLL_INTERVAL_MS = 2_000L
 private const val WORLD_ID_STATUS_POLL_INTERVAL_MS = 2_000L
 private val TERMINAL_EVENT_STATES = setOf("completed", "failed")

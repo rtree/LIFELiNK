@@ -10,6 +10,10 @@ type InitialContext = {
   longitude: number | null;
   accuracyM: number | null;
   capturedAt: string | null;
+  batteryPercent: number | null;
+  batteryCharging: boolean | null;
+  motionState: string | null;
+  motionPeakG: number | null;
   initialNote: string | null;
 };
 
@@ -46,7 +50,7 @@ export function injectEmergencyUpdate(
         content: [
           {
             type: "input_text",
-            text: `緊急連絡アプリから新しい情報です。相手に簡潔に伝えてください。${text}`,
+            text: `New information from the emergency app. Tell the person on the call briefly. ${text}`,
           },
         ],
       },
@@ -121,18 +125,42 @@ export function isValidTwilioRequest(
 
 function buildInitialMessage(context: InitialContext): string {
   const freshness = context.capturedAt
-    ? `${Math.max(0, Math.round((Date.now() - Date.parse(context.capturedAt)) / 1000))}秒前`
-    : "取得時刻不明";
-  // Hackathon privacy policy: never speak raw GPS coordinates or accuracy.
-  // `context.address` is already prefecture-level only (Android reverse-geocodes
-  // to adminArea before sending), so this is the coarsest location we ever say.
-  return [
-    "これはLIFELiNK緊急連絡アプリからの自動電話です。",
-    context.address ? `本人がいるのは${context.address}付近です。` : "現在地の都道府県は取得できていません。",
-    `位置情報は${freshness}に取得されました。`,
-    context.initialNote ? `本人からのメモは「${context.initialNote}」です。` : "本人からの状況メモはありません。",
-    "新しい情報が入り次第お伝えします。",
-  ].join(" ");
+    ? `${Math.max(0, Math.round((Date.now() - Date.parse(context.capturedAt)) / 1000))} seconds ago`
+    : "at an unknown time";
+  // Hackathon privacy policy: never speak raw GPS coordinates. `context.address`
+  // is already prefecture-level only (Android reverse-geocodes to adminArea
+  // before sending), so this is the coarsest location we ever say. Accuracy is
+  // spoken on purpose: it conveys how trustworthy the area is without locating
+  // the person.
+  const lines = [
+    "This is an automated call from the LIFELiNK emergency app.",
+    context.address
+      ? `The person is somewhere around ${context.address}.`
+      : "Their area could not be determined.",
+    context.accuracyM != null
+      ? `That area is accurate to about ${Math.round(context.accuracyM)} meters.`
+      : "The accuracy of that area is unknown.",
+    `The location was captured ${freshness}.`,
+  ];
+  if (context.batteryPercent != null) {
+    lines.push(
+      `Their phone battery is at ${context.batteryPercent} percent${
+        context.batteryCharging === true ? " and charging" : ""
+      }.`,
+    );
+  }
+  if (context.motionState === "shaking") {
+    lines.push("Their phone is being shaken hard right now.");
+  } else if (context.motionState === "moving") {
+    lines.push("Their phone is moving.");
+  }
+  lines.push(
+    context.initialNote
+      ? `Their note says: ${context.initialNote}.`
+      : "They did not leave a note.",
+  );
+  lines.push("I will pass on anything new as it arrives.");
+  return lines.join(" ");
 }
 
 export type CallTranscriptSpeaker = "contact" | "ai" | "system";
@@ -191,12 +219,14 @@ export function registerMediaBridge(
             type: "realtime",
             model: config.OPENAI_REALTIME_MODEL,
             instructions:
-              "あなたは緊急連絡を補助する日本語の音声AIです。事実を推測せず、簡潔に話してください。相手の質問に答え、不明な情報は不明と伝えてください。",
+              "You are an English-speaking voice AI assisting an emergency call. " +
+              "Never guess or invent facts. Speak briefly and calmly. Answer the " +
+              "other person's questions, and say plainly when you do not know something.",
             output_modalities: ["audio"],
             audio: {
               input: {
                 format: { type: "audio/pcmu" },
-                transcription: { model: "gpt-4o-mini-transcribe", language: "ja" },
+                transcription: { model: "gpt-4o-mini-transcribe", language: "en" },
                 turn_detection: {
                   type: "server_vad",
                   create_response: true,
@@ -247,7 +277,7 @@ export function registerMediaBridge(
           return;
         }
         const initialMessage = buildInitialMessage(context);
-        pendingInitialMessage = `次の文章をそのまま最初に読み上げてください。${initialMessage}`;
+        pendingInitialMessage = `Read the following out loud first, exactly as written. ${initialMessage}`;
         if (openAiSocket.readyState === WebSocket.OPEN) {
           activeRealtimeSessions.set(emergencyEventId, openAiSocket);
         }

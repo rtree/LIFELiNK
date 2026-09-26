@@ -40,7 +40,7 @@ async function discordBotRequest(path: string, body: unknown, retried = false): 
   return { ok: true, body: json };
 }
 
-const replyButtonRow = (eventId: string, label = "状況を返信") => ({
+const replyButtonRow = (eventId: string, label = "Reply with an update") => ({
   type: 1,
   components: [{ type: 2, style: 1, label, custom_id: `reply:${eventId}` }],
 });
@@ -89,7 +89,7 @@ function htmlPage(reply: FastifyReply, status: number, title: string, body: stri
     .header("cache-control", "no-store")
     .header("referrer-policy", "no-referrer")
     .send(
-      `<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">` +
+      `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">` +
         `<title>${escape(title)}</title><style>body{font-family:sans-serif;max-width:32rem;margin:2rem auto;padding:0 1rem;line-height:1.6}a.btn{display:inline-block;background:#5865F2;color:#fff;padding:.8rem 1.2rem;border-radius:8px;text-decoration:none}</style></head>` +
         `<body><h1>${escape(title)}</h1>${body}</body></html>`,
     );
@@ -97,7 +97,7 @@ function htmlPage(reply: FastifyReply, status: number, title: string, body: stri
 
 async function ownerDisplayName(uid: string) {
   const user = await getAuth().getUser(uid).catch(() => null);
-  return user?.displayName || "LIFELiNK 利用者";
+  return user?.displayName || "a LIFELiNK user";
 }
 
 const invitePathPattern = /^[A-Za-z0-9]{10,128}\.[A-Za-z0-9]{10,40}\.[A-Za-z0-9_-]{20,64}$/;
@@ -135,11 +135,16 @@ export function registerDiscordRoutes(app: FastifyInstance, db: Firestore) {
 
   app.get("/v1/discord/invite/:invite", async (request, reply) => {
     const parsed = inviteParamSchema.safeParse(request.params);
-    if (!parsed.success) return htmlPage(reply, 404, "招待が見つかりません", "<p>URL を確認してください。</p>");
+    if (!parsed.success) return htmlPage(reply, 404, "Invitation not found", "<p>Please check the URL.</p>");
     const [ownerUid = "", inviteId = "", token = ""] = parsed.data.invite.split(".");
     const invite = await findInvite(ownerUid, inviteId, token);
     if (!invite || invite.expired || invite.used) {
-      return htmlPage(reply, 410, "この招待は使えません", "<p>期限切れか使用済みです。発行者に新しい招待を依頼してください。</p>");
+      return htmlPage(
+        reply,
+        410,
+        "This invitation can no longer be used",
+        "<p>It has expired or has already been used. Please ask the sender for a new invitation.</p>",
+      );
     }
     const owner = await ownerDisplayName(invite.ownerUid);
     const authorize = new URL("https://discord.com/oauth2/authorize");
@@ -152,25 +157,25 @@ export function registerDiscordRoutes(app: FastifyInstance, db: Firestore) {
     return htmlPage(
       reply,
       200,
-      "LIFELiNK 緊急連絡先への招待",
-      `<p><b>${escapedOwner}</b> さんが、あなたを LIFELiNK の緊急連絡先（Discord）に招待しています。</p>` +
-        `<p>同意すると、${escapedOwner} さんが緊急ボタンを押したときに、LIFELiNK Bot から Discord の DM が届きます。DM には次の情報だけが含まれます。</p>` +
-        `<ul><li>緊急連絡であること・発信者名</li><li>都道府県レベルの現在地と取得時刻（詳細住所・座標は含みません）</li><li>発信者が入力した状況メモ</li></ul>` +
-        `<p>DM の「状況を返信」から送った内容は、そのイベントの参考情報として記録されます。LIFELiNK はあなたの Discord ユーザー ID と表示名だけを保存し、友人一覧やメッセージは読みません。</p>` +
-        `<p><a class="btn" href="${authorize.toString().replace(/&/g, "&amp;")}">同意して Discord で本人確認</a></p>`,
+      "Invitation to be a LIFELiNK emergency contact",
+      `<p><b>${escapedOwner}</b> has invited you to be one of their LIFELiNK emergency contacts on Discord.</p>` +
+        `<p>If you agree, the LIFELiNK Bot will send you a Discord DM whenever ${escapedOwner} presses the emergency button. The DM contains only the following:</p>` +
+        `<ul><li>That it is an emergency alert, and the name of the person who sent it</li><li>Their location at prefecture level and the time it was captured (no street address and no GPS coordinates)</li><li>The situation note they wrote</li></ul>` +
+        `<p>Anything you send with "Reply with an update" in the DM is recorded as additional information for that emergency. LIFELiNK stores only your Discord user ID and display name; it does not read your friend list or your messages.</p>` +
+        `<p><a class="btn" href="${authorize.toString().replace(/&/g, "&amp;")}">Agree and verify with Discord</a></p>`,
     );
   });
 
   app.get("/v1/discord/oauth/callback", async (request, reply) => {
     const parsed = callbackQuerySchema.safeParse(request.query);
-    if (!parsed.success) return htmlPage(reply, 400, "登録できませんでした", "<p>認可がキャンセルされたか、URL が不正です。</p>");
+    if (!parsed.success) return htmlPage(reply, 400, "Registration failed", "<p>Authorization was cancelled, or the URL is invalid.</p>");
     const [ownerUid, inviteId, token] = parsed.data.state.split(".");
     if (!ownerUid || !inviteId || !token || !config.DISCORD_CLIENT_SECRET) {
-      return htmlPage(reply, 400, "登録できませんでした", "<p>招待情報が不正です。</p>");
+      return htmlPage(reply, 400, "Registration failed", "<p>The invitation details are invalid.</p>");
     }
     const invite = await findInvite(ownerUid, inviteId, token);
     if (!invite || invite.expired || invite.used) {
-      return htmlPage(reply, 410, "この招待は使えません", "<p>期限切れか使用済みです。</p>");
+      return htmlPage(reply, 410, "This invitation can no longer be used", "<p>It has expired or has already been used.</p>");
     }
 
     const tokenResponse = await fetch(`${DISCORD_API}/oauth2/token`, {
@@ -186,12 +191,12 @@ export function registerDiscordRoutes(app: FastifyInstance, db: Firestore) {
     });
     if (!tokenResponse.ok) {
       app.log.warn({ status: tokenResponse.status }, "Discord OAuth code exchange failed");
-      return htmlPage(reply, 502, "登録できませんでした", "<p>Discord での本人確認に失敗しました。もう一度お試しください。</p>");
+      return htmlPage(reply, 502, "Registration failed", "<p>Verification with Discord failed. Please try again.</p>");
     }
     const { access_token: accessToken } = (await tokenResponse.json()) as { access_token: string };
     const meResponse = await fetch(`${DISCORD_API}/users/@me`, { headers: { authorization: `Bearer ${accessToken}` } });
     if (!meResponse.ok) {
-      return htmlPage(reply, 502, "登録できませんでした", "<p>Discord アカウント情報を取得できませんでした。</p>");
+      return htmlPage(reply, 502, "Registration failed", "<p>Could not retrieve your Discord account information.</p>");
     }
     const me = (await meResponse.json()) as { id: string; username: string; global_name?: string | null };
     const displayName = me.global_name || me.username;
@@ -216,12 +221,12 @@ export function registerDiscordRoutes(app: FastifyInstance, db: Firestore) {
       });
       return "linked";
     });
-    if (outcome === "used") return htmlPage(reply, 410, "この招待は使えません", "<p>使用済みです。</p>");
+    if (outcome === "used") return htmlPage(reply, 410, "This invitation can no longer be used", "<p>It has already been used.</p>");
     return htmlPage(
       reply,
       200,
-      "登録が完了しました",
-      "<p>LIFELiNK の緊急連絡先として登録されました。このページは閉じて構いません。発行者がテスト DM を送ると、LIFELiNK Bot から DM が届きます。</p>",
+      "You are all set",
+      "<p>You are now registered as a LIFELiNK emergency contact. You can close this page. When the sender sends a test DM, it will arrive from the LIFELiNK Bot.</p>",
     );
   });
 
@@ -263,8 +268,8 @@ export function registerDiscordRoutes(app: FastifyInstance, db: Firestore) {
     const owner = await ownerDisplayName(request.user.uid);
     const result = await sendDirectMessage(
       parsed.data.id,
-      `【LIFELiNK テスト】${owner} さんの緊急連絡先として登録されています。これはテストです。届いていたら下のボタンを押してください。`,
-      { label: "受信を確認", customId: `ack:${request.user.uid}` },
+      `[LIFELiNK test] You are registered as an emergency contact for ${owner}. This is only a test. If you received it, please press the button below.`,
+      { label: "Confirm received", customId: `ack:${request.user.uid}` },
     );
     await ref.update({
       last_test_dm: result.ok
@@ -299,30 +304,30 @@ export function registerDiscordRoutes(app: FastifyInstance, db: Firestore) {
       const user = interaction.user ?? interaction.member?.user;
       const customId: string = interaction.data?.custom_id ?? "";
       const ephemeral = (content: string) => ({ type: 4, data: { content, flags: 64 } });
-      if (!user?.id) return ephemeral("ユーザーを確認できませんでした。");
+      if (!user?.id) return ephemeral("Could not identify your account.");
 
       if (interaction.type === 3 && customId.startsWith("ack:")) {
         const ref = contactsOf(customId.slice(4)).doc(user.id);
         const contact = await ref.get();
-        if (!contact.exists || contact.get("status") !== "active") return ephemeral("この連絡先は登録されていません。");
+        if (!contact.exists || contact.get("status") !== "active") return ephemeral("You are not registered as this person's contact.");
         await ref.update({ "last_test_dm.acknowledged_at": FieldValue.serverTimestamp(), updated_at: FieldValue.serverTimestamp() });
-        return ephemeral("受信を確認しました。ありがとうございます。");
+        return ephemeral("Receipt confirmed. Thank you.");
       }
 
       if (interaction.type === 3 && customId.startsWith("reply:")) {
         const eventId = customId.slice(6);
         const notification = await db.collection("emergency_events").doc(eventId).collection("discord_notifications").doc(user.id).get();
-        if (!notification.exists) return ephemeral("このイベントへの返信は許可されていません。");
+        if (!notification.exists) return ephemeral("You are not allowed to reply to this emergency.");
         return {
           type: 9,
           data: {
             custom_id: `replymodal:${eventId}`,
-            title: "状況を返信",
+            title: "Reply with an update",
             components: [
               {
                 type: 1,
                 components: [
-                  { type: 4, custom_id: "text", label: "分かっていること・これからすること", style: 2, min_length: 1, max_length: REPLY_MAX_LENGTH, required: true },
+                  { type: 4, custom_id: "text", label: "What you know / what you will do", style: 2, min_length: 1, max_length: REPLY_MAX_LENGTH, required: true },
                 ],
               },
             ],
@@ -339,10 +344,10 @@ export function registerDiscordRoutes(app: FastifyInstance, db: Firestore) {
         ]);
         // A reply is accepted only for the event whose owner actually DM'd this Discord user.
         if (!event.exists || !notification.exists || notification.get("owner_uid") !== event.get("uid")) {
-          return ephemeral("このイベントへの返信は許可されていません。");
+          return ephemeral("You are not allowed to reply to this emergency.");
         }
         const text: string = (interaction.data?.components?.[0]?.components?.[0]?.value ?? "").trim().slice(0, REPLY_MAX_LENGTH);
-        if (!text) return ephemeral("返信が空です。");
+        if (!text) return ephemeral("Your reply was empty.");
         const authorName = (notification.get("display_name_snapshot") as string) ?? user.username;
         const updateRef = eventRef.collection("updates").doc(`discord_${interaction.id}`);
         await updateRef
@@ -367,7 +372,7 @@ export function registerDiscordRoutes(app: FastifyInstance, db: Firestore) {
           callActive &&
           injectEmergencyUpdate(
             eventId,
-            `発信者の友人「${authorName}」から Discord で返信がありました（未確認の第三者情報として伝えてください）: ${text}`,
+            `The caller's friend "${authorName}" replied on Discord. Relay it as unverified third-party information: ${text}`,
           );
         if (delivered) await updateRef.update({ delivered_to_ai_at: FieldValue.serverTimestamp() });
         return {
@@ -375,14 +380,14 @@ export function registerDiscordRoutes(app: FastifyInstance, db: Firestore) {
           data: {
             flags: 64,
             content: delivered
-              ? `返信を記録し、通話中の AI に伝えました。「${text.slice(0, 80)}」`
-              : "返信を記録しました（通話は既に終了しているか、まだつながっていません）。",
-            components: [replyButtonRow(eventId, "続けて返信")],
+              ? `Your reply was recorded and passed to the AI on the call. "${text.slice(0, 80)}"`
+              : "Your reply was recorded (the call has already ended, or has not connected yet).",
+            components: [replyButtonRow(eventId, "Send another reply")],
           },
         };
       }
 
-      return ephemeral("この操作には対応していません。");
+      return ephemeral("This action is not supported.");
     });
   });
 }
@@ -401,15 +406,50 @@ export async function notifyDiscordContacts(
     .get();
   if (contacts.empty) return;
   const owner = await ownerDisplayName(event.ownerUid);
-  const where = event.prefecture ? `${event.prefecture}（都道府県レベル）` : "取得できていません";
-  const when = event.capturedAt
-    ? new Date(event.capturedAt).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })
-    : "不明";
+  // Device signals live on the event document; the caller only passes the fields it already had.
+  const snapshot =
+    ((await db.collection("emergency_events").doc(event.eventId).get()).get("location_snapshot") as
+      | Record<string, any>
+      | null
+      | undefined) ?? null;
+
+  const details: string[] = [];
+  const accuracy = typeof snapshot?.accuracy_m === "number" ? Math.round(snapshot.accuracy_m) : null;
+  if (accuracy != null) details.push(`accuracy +/-${accuracy} m`);
+  if (event.capturedAt) {
+    details.push(
+      `captured ${new Date(event.capturedAt).toLocaleTimeString("en-GB", {
+        timeZone: "Asia/Tokyo",
+        hour: "2-digit",
+        minute: "2-digit",
+      })}`,
+    );
+  }
+  const place = event.prefecture ? `${event.prefecture} (prefecture level)` : "not available";
+  const lines = [`Location: ${place}${details.length ? ` (${details.join(", ")})` : ""}`];
+
+  if (typeof snapshot?.battery_percent === "number") {
+    const charging =
+      typeof snapshot.battery_charging === "boolean"
+        ? ` (${snapshot.battery_charging ? "charging" : "not charging"})`
+        : "";
+    lines.push(`Phone battery: ${snapshot.battery_percent}%${charging}`);
+  }
+
+  if (snapshot?.motion_state === "moving" || snapshot?.motion_state === "shaking") {
+    const peak =
+      typeof snapshot.motion_peak_g === "number" ? ` (peak ${snapshot.motion_peak_g.toFixed(1)} G)` : "";
+    lines.push(
+      `Motion: ${snapshot.motion_state === "shaking" ? "being shaken hard" : "on the move"}${peak}`,
+    );
+  }
+
+  if (event.note) lines.push(`Situation note: ${event.note.slice(0, 300)}`);
+
   const content =
-    `🚨【LIFELiNK 緊急連絡】${owner} さんが緊急ボタンを押しました。登録済みの連絡先へ AI が電話しています。\n` +
-    `現在地: ${where}\n取得時刻: ${when}` +
-    (event.note ? `\n状況メモ: ${event.note.slice(0, 300)}` : "") +
-    `\n分かっていることがあれば「状況を返信」から送ってください。`;
+    `🚨 LIFELiNK emergency alert - ${owner} pressed the emergency button. Our AI is calling their registered contact now.\n` +
+    lines.join("\n") +
+    `\nIf you know anything, send it with "Reply with an update".`;
 
   await Promise.all(
     contacts.docs.map(async (contact) => {
@@ -426,7 +466,7 @@ export async function notifyDiscordContacts(
         if ((error as { code?: number }).code === 6) return;
         throw error;
       }
-      const result = await sendDirectMessage(contact.id, content, { label: "状況を返信", customId: `reply:${event.eventId}` });
+      const result = await sendDirectMessage(contact.id, content, { label: "Reply with an update", customId: `reply:${event.eventId}` });
       await ref.update(
         result.ok
           ? { status: "sent", channel_id: result.channelId, message_id: result.messageId, attempted_at: FieldValue.serverTimestamp() }
@@ -463,7 +503,7 @@ export function relayCallTranscript(
         delivered_to_ai_at: null,
       });
       const recipients = await eventRef.collection("discord_notifications").where("status", "==", "sent").get();
-      const label = speaker === "contact" ? "📞 電話の相手" : speaker === "ai" ? "🤖 AI" : "ℹ️";
+      const label = speaker === "contact" ? "📞 Person on the call" : speaker === "ai" ? "🤖 AI" : "ℹ️";
       await Promise.all(
         recipients.docs.map(async (recipient) => {
           const channelId = recipient.get("channel_id") as string | undefined;

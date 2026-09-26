@@ -22,8 +22,8 @@
 | **モック・ダミーデータを作らない** | `.github/copilot-instructions.md` の方針。UI は最初から本物の Firestore コレクションだけを読む。未実装は「準備中」と表示する。 |
 | P0 の `emergency_events`/`updates` の既存データを**移行・削除しない** | MVP 0.1 の実機検証の証跡。P2 は新規イベントから `emergencySessions` を使う。バックアップ: `gs://ethglobaltokyo2026lifelink-firestore-backups/mvp-0.1-2026-09-26`。 |
 | 音声は **G.711 μ-law / 8kHz / mono（`audio/pcmu`）** | Twilio Media Streams と OpenAI Realtime の両端でこの形式に揃えてある。片側だけ変えると無音・雑音・書き起こし失敗になる。 |
+| **アプリも AI の発話も Discord も英語** | 2026-09-26 15:5x のユーザー指示で全面英語化した。`voice.ts` の `instructions`・`buildInitialMessage`・`injectEmergencyUpdate`、`server.ts` の `formatEmergencyUpdate`、`discord.ts` の DM・ボタン・招待ページもすべて英語。入力音声の transcription も `language: "en"`。**同日より前の「電話の発話は日本語のままにする」という記述はこの指示で取り消された**。日本語話者にかけるデモでは相手が英語で応対される点に注意。 |
 | スキーマは**コードより先に `doc/plan.md` を直す** | 6 章・6a 章・「P0-16 凍結スキーマ・API」・8a 章が正本。`firestore.rules` / `firestore.indexes.json` はその従属物。 |
-| **AI が電話で話す日本語を英語にしない** | アプリ UI は英語だが、`voice.ts` の `buildInitialMessage` / `instructions` / `injectEmergencyUpdate` と `server.ts` の AI 注入文は日本語が正しい。受け手は日本語話者の緊急連絡先で、ここを英語化すると実通話が壊れる。詳細は `doc/plan.md` 4a 章「言語方針」。 |
 
 ## 3. 環境（ホスト・ビルド・デプロイ）
 
@@ -98,7 +98,8 @@ ssh beacon-host '"$HOME/Library/Android/sdk/platform-tools/adb" -s RFGL41GKP0Z l
   2. `Twilio Media Stream status` の `streamError` が null なら Stream 自体は正常。
   3. `updates` に `transcript_contact` が並んでいれば相手→AI の上り方向は生きている。
   この 3 つが揃ったらコードを触らずに掛け直す。直らないときの次の容疑は `input_audio_buffer.speech_started` ごとの Twilio `clear`（`voice.ts`）による自己割り込みだが、上記の事件では相手が無言の区間でも聞こえていなかったためこれでは説明できなかった。
-- `sanitizeLocationForPersistence()` は名前に反して **`accuracy_m` は意図的に残す**（位置を明かさない数値のため）。消すのは緯度・経度と番地レベルの住所だけ。
+- `sanitizeLocationForPersistence()` は名前に反して **`accuracy_m`・`battery_*`・`motion_*` は意図的に残す**（位置を明かさない情報のため）。消すのは緯度・経度と番地レベルの住所だけ。（履歴: 2026-09-26 のプライバシー対応で一度 `accuracy_m` も破棄していたが、行き過ぎだったため復活させた。）
+- **`getCurrentLocation()` はアプリがバックグラウンドになると完了しない**。定期取得ループをそのまま `while` で回すと、画面が消えた瞬間に `await()` で永久に止まり、前面に戻しても再開しない（実際に踏んで 1 回しか送られなかった）。`repeatOnLifecycle(STARTED)` で囲い、`withTimeoutOrNull` で時間を切ること。
 - **Compose の `LazyColumn` を親の `verticalScroll` の中に置くときは `heightIn(max = ...)` を付ける**。無制限だとクラッシュし、`height` 固定だと発言が少ないときに大きな空白が残る（P1-16 で実際に踏んだ）。
 - **`targetSdk 36` は強制 edge-to-edge**。自前の `topBar` に `Modifier.statusBarsPadding()` を付けないとロゴがステータスバーに重なる。
 - **`lightColorScheme` は使うロールを全て明示する**。`tertiaryContainer` を省くと M3 既定のピンクが入り、ライブフィードの吹き出しが全部ピンクに見える。

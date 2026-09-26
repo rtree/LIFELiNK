@@ -16,6 +16,10 @@ data class LocationSnapshot(
     val capturedAt: String,
     val address: String? = null,
     val geocodedAt: String? = null,
+    val batteryPercent: Int? = null,
+    val batteryCharging: Boolean? = null,
+    val motionState: String? = null,
+    val motionPeakG: Float? = null,
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("latitude", latitude)
@@ -24,6 +28,10 @@ data class LocationSnapshot(
         .put("captured_at", capturedAt)
         .put("address", address ?: JSONObject.NULL)
         .put("geocoded_at", geocodedAt ?: JSONObject.NULL)
+        .put("battery_percent", batteryPercent ?: JSONObject.NULL)
+        .put("battery_charging", batteryCharging ?: JSONObject.NULL)
+        .put("motion_state", motionState ?: JSONObject.NULL)
+        .put("motion_peak_g", motionPeakG?.toDouble() ?: JSONObject.NULL)
 
     companion object {
         fun fromJson(json: JSONObject): LocationSnapshot = LocationSnapshot(
@@ -33,6 +41,10 @@ data class LocationSnapshot(
             capturedAt = json.getString("captured_at"),
             address = if (json.isNull("address")) null else json.getString("address"),
             geocodedAt = if (json.isNull("geocoded_at")) null else json.getString("geocoded_at"),
+            batteryPercent = if (json.isNull("battery_percent")) null else json.optInt("battery_percent"),
+            batteryCharging = if (json.isNull("battery_charging")) null else json.optBoolean("battery_charging"),
+            motionState = if (json.isNull("motion_state")) null else json.optString("motion_state"),
+            motionPeakG = if (json.isNull("motion_peak_g")) null else json.optDouble("motion_peak_g").toFloat(),
         )
     }
 }

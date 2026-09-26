@@ -254,7 +254,7 @@ UI 全体の完成形を先に見る価値はあるが、電話と iBeacon の�
   - **Settings**: アカウント、World ID、位置情報、物理ボタン（リンク・見守り・電池最適化・送信時間）、Diagnostics（Beacon ログ）、Backend URL。
 - テーマは `Theme.kt` / `Color.kt`（モック由来: primary=ネイビー `#0E2A55`、error=緊急レッド `#E23B32`、background=`#F2F6FD`、ボタンは pill 形状）。`lightColorScheme` は `tertiaryContainer` と `surfaceContainer*` まで明示する（未指定だと M3 の既定ピンクが出てフィードの吹き出しが全部ピンクになる）。
 - `targetSdk 36` は強制 edge-to-edge のため、自前の `topBar` には `Modifier.statusBarsPadding()` が必須（付け忘れるとロゴがステータスバーに重なる）。
-- **言語方針**: アプリ UI は英語。**AI が電話で話す日本語（`voice.ts` の `buildInitialMessage` / `instructions` / `injectEmergencyUpdate`、`server.ts` の AI 注入文）は日本語のまま維持する**（受け手は日本語話者の緊急連絡先であり、ここを英語にすると実通話が壊れる）。Discord の DM 本文・招待ページ・ボタンラベルも当面日本語のまま（受け手は日本語話者の友人）。フィードに出る `author_name` と通話終了の `system` 本文だけ英語化した（Cloud Run rev `00027-g5z`）。
+- **言語方針（2026-09-26 更新）**: アプリ UI、**AI の発話**、Discord の DM・ボタン・招待ページのすべてを英語に統一した。`voice.ts` の `instructions` は英語話者の AI、入力音声の transcription も `language: "en"`。一旦は「受け手が日本語話者なので発話だけ日本語で残す」と決めたが、ユーザーの明示的な指示で取り消している。日本語でのデモが必要になったら、言語はこの 3 箇所（`instructions` / `buildInitialMessage` / `transcription.language`）を切り替えれば戻せる。
 - 文言は Kotlin 内のリテラルのまま。`values/strings.xml` への抽出は多言語対応が必要になった時点で行う（ハッカソン中は着手しない）。
 
 ## 5. システム構成
@@ -327,11 +327,38 @@ flowchart LR
 
 ### `users/{uid}/locations/{location_id}`
 
-2026-09-26 のプライバシー方針（8 章）により、Android は `latitude`/`longitude`/`accuracy_m` を API リクエストには含めるが、backend は保存前に削除する。Firestore に残るのは次のとおり。
+2026-09-26 のプライバシー方針（8 章）により、Android は `latitude`/`longitude` を API リクエストには含めるが、backend は保存前に削除する。Firestore に残るのは次のとおり。
 
 - `address`（都道府県レベル、Android の `Geocoder.adminArea` で解決）
+- `accuracy_m`: 位置精度（メートル）。**保存・発話する**。座標を明かさずに「どれくらい確からしいか」を伝えられるため（2026-09-26 改訂。P0.5-09 で「一律破棄は行き過ぎ」と判断していたものを、ユーザー要望を受けてここで実装した）
 - `captured_at`
 - `geocoded_at`
+- `battery_percent`: 0〜100 の整数、取得できないときは `null`
+- `battery_charging`: boolean、取得できないときは `null`
+- `motion_state`: `still` | `moving` | `shaking`、取得できないときは `null`
+- `motion_peak_g`: 直近の観測窓での加速度ピーク（G、重力を除いた大きさ）、取得できないときは `null`
+
+### デバイス状態の契約（2026-09-26 凍結、P1-20）
+
+位置・電池・揺れは**同じ 1 本の経路**で運ぶ。別コレクションや別 update type は作らない。
+
+```yaml
+# POST /v1/locations と POST /v1/emergency-events/{id}/updates (type: location) の共通ペイロード
+latitude: number         # 送るが保存しない
+longitude: number        # 送るが保存しない
+accuracy_m: number       # 保存する・AI が話す・Discord DM に載せる
+captured_at: string      # ISO8601
+address: string | null   # 都道府県レベルのみ
+geocoded_at: string | null
+battery_percent: integer | null   # 0..100
+battery_charging: boolean | null
+motion_state: still | moving | shaking | null
+motion_peak_g: number | null
+```
+
+- 追加フィールドはすべて **optional**。旧クライアントからのリクエストは従来どおり通る。
+- **揺れ検知は通報を自動発火させない**。`shaking` はあくまで状況情報として保存・発話・DM する。加速度だけで緊急と断定すると誤報（カバンの中、ランニング、車内）が避けられず、緊急通報アプリでの誤発信は実害が大きいため。自動発火を入れるなら別途しきい値の実測と人間の判断が要る。
+- 送信間隔（2026-09-26 決定）: アプリが前面にある間は **60 秒に 1 回** `POST /v1/locations`、緊急イベントが進行中（`accepted`/`dialing`/`in_progress`）の間は **10 秒に 1 回** そのイベントの `updates` へ送る。バックグラウンドでの定期取得はしない（Play の位置情報ポリシーと電池消費を避けるため。常駐が必要になったら FGS の型追加と再設計が要る）。
 
 ### `users/{uid}/linkedTriggers/{trigger_id}`（設計メモ、2026-09-26、1a 章の不足 1 への対応、未実装）
 
@@ -363,7 +390,7 @@ users/{uid}/linkedTriggers/{trigger_id}:
 - `trigger_type`: `screen_button` または `ble`
 - `trigger_source`: `trigger_type` が `ble` のときのみ `beacon` または `gatt`（クライアントが送らない場合は backend が `beacon` を補う。`ble` 以外は `null`）
 - `state`: `accepted`、`dialing`、`in_progress`、`completed`、`failed`
-- `location_snapshot`（`address`/`captured_at`/`geocoded_at` のみ。GPS 座標・精度は含まない）
+- `location_snapshot`（`address`/`accuracy_m`/`captured_at`/`geocoded_at`/`battery_*`/`motion_*`。GPS 座標は含まない）
 - `initial_note`
 - `twilio_call_sid`
 - `created_at`
