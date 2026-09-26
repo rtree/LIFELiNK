@@ -20,8 +20,8 @@ API・データ構造を見直す前に、まず対応すべきユースケー�
 2. **通話相手からの質問への回答**: 通話相手が「今どこにいるんですか」「誰か状況を知っている人はいないんですか」と尋ねたとき、状況ストアから関連する事実を集めて回答する。
    - **現状の対応**: 8a 章の `get_current_situation`/`get_session_history`/`delegate_investigation` で概ね対応済み。ただし「誰か知っている人はいないか」という質問は暗黙に `facts.kind: friend_reply` を探す動きを期待しているのに、Realtime への instructions にその探索対象が明示されていない。次回、instructions と `get_session_history` の `topic` enum に友人発言を明示的に含めるかを詰める。
 3. **状況ストアに蓄積する情報の範囲**: 緊急コールごとに、(a) 位置情報（デモのためデモ用途では都道府県レベルへ丸めた地名 + 精度 `accuracy_m` 自体は正確な値）、(b) Discord または LIFELiNK 間リンクを通じた友人からの情報、(c) 将来追加される情報プロバイダからの情報、(d) そもそも誰がプライマリユーザーで誰が友人ユーザーかが蓄積され、OpenAI Realtime がそれらを検索・取得して回答に使える。
-   - **現状の不足（訂正が必要）**: 直近のプライバシー方針変更（8 章）で `accuracy_m` も一律に破棄する実装にしてしまったが、本来 `accuracy_m`（GPS 精度のメートル数）自体は位置そのものを明かさない数値であり、破棄する理由がない。破棄すべきは緯度・経度と番地レベルの住所だけで、精度は状況ストアの `facts`/`state/current` に残してよい。次回の API/データ設計で `state/current.location` へ `accuracy_m` を復活させ、backend の `sanitizeLocationForPersistence()` も精度は保持するよう見直す。
-   - `facts.source.actor_id` はあるが、AI が「友人の太郎さんが〜と言っています」のように名前で回答するための表示名が正規化されていない。`source.actor_name` の追加を次回検討する。
+   - **解消済み（2026-09-26、スキーマ）**: 8a 章の `facts.value`（`kind: location`）と `state/current.location` へ `accuracy_m` を復活させた。破棄すべきは緯度・経度と番地レベルの住所だけで、精度自体は位置を明かさない数値のため保持してよい。**残作業**: P0 側の `users/{uid}/locations`・`emergency_events.location_snapshot` を書く `backend/src/server.ts` の `sanitizeLocationForPersistence()` はまだ `accuracy_m` を破棄したままで、これは P2 の `facts`/`state/current` とは別の書き込みパスなので併せて直す必要がある。今回は Discord 主線（同じファイルを編集中）と衝突しないよう、コード変更は次回に持ち越す。
+   - **解消済み（2026-09-26、スキーマ）**: `facts.source` へ `actor_name: string | null` を追加した（8a 章）。
    - 「誰がプライマリユーザーで誰が友人か」は `emergencySessions.owner_uid`/`participant_uids` で表現済みで、追加の不足はない。
 4. **友人への通知経路**: 緊急コールが発生したとき、友人にも Discord またはアプリ内共有で連絡できる。
   - **現状の対応**: 電話/iBeacon の実通話は確認済み。次の MVP 主線は Discord 個別 DM と返信の実アカウント検証（P0-16〜P0-20）。アプリ同士の共有は将来の任意機能。どちらの友人共有もまだ実装済みではない。
@@ -80,7 +80,7 @@ API・データ構造を見直す前に、まず対応すべきユースケー�
 - LIFELiNK アプリ同士の Google/Firebase 友人リンク・友人向け共有 UI（将来の任意機能）
 - Discord 風の通話・会話履歴
 - Android マイクからの周辺音声中継
-- GATT ボタンとロック中の常時反応
+- GATT ボタンとロック中の常時反応（**2026-09-26 決定: ストレッチゴール、優先度は本リストの中で最低。iBeacon が実機で動作したため、他の項目がすべて片付いて時間が余った場合のみ着手する**）
 - Play Store 公開対応
 - 通話録音、長期トランスクリプト保存
 
@@ -188,6 +188,45 @@ Portal アプリ・Bot token の発行と Secret Manager への安全な事前�
 
 **保存場所（6 章の原則に従う）**: 承認済みの受信者登録は本人だけが読み書きする私的データなので `users/{uid}/discordContacts/{contact_id}`（`discord_user_id`、`display_name_snapshot`、`consented_at`、`status: pending|active|revoked` 程度）に置く。招待は `users/{uid}/discordInvites/{invite_id}` で所有者に紐付け、原文トークンでなくハッシュと有効期限・使用済み状態を保存する。返信は実イベントの共有フィード（先行検証時は `emergency_events/{id}/updates`、P2 化後は `emergencySessions/{id}/facts` と `timeline`）へ backend のみが書く。宛先スナップショットと配送状態のスキーマ、P0→P2 書き込み切替契約は実装より先に本文書で凍結する。
 
+**P0-16 凍結スキーマ・API（2026-09-26、以後コードより先に本節を直す）**
+
+非秘密 ID: `DISCORD_APPLICATION_ID=1553217776179486882`、`DISCORD_PUBLIC_KEY=ed97e676…fdb84`（全体は `backend/src/config.ts` 既定値）。秘密は `key-discord-bot-token`→`DISCORD_BOT_TOKEN`、`key-discord-oauth-client-secret`→`DISCORD_CLIENT_SECRET`。OAuth redirect は `${BACKEND_URL}/v1/discord/oauth/callback`、Interactions endpoint は `${BACKEND_URL}/v1/discord/interactions`。
+
+```yaml
+users/{uid}/discordInvites/{invite_id}:      # 発信者が発行、一回限り
+  token_hash: sha256(hex)                    # 原文トークンは保存しない
+  created_at, expires_at: timestamp          # 24 時間
+  used_at: timestamp | null
+  used_by_discord_user_id: string | null
+users/{uid}/discordContacts/{discord_user_id}:   # doc id = Discord user id（重複登録防止）
+  discord_user_id, display_name_snapshot: string
+  status: active | revoked
+  invite_id: string
+  consented_at, created_at, updated_at: timestamp
+  last_test_dm: { status: sent | failed, message_id?, error_code?, http_status?, attempted_at, acknowledged_at? } | null
+emergency_events/{event_id}/discord_notifications/{discord_user_id}:   # 宛先スナップショット兼配送状態
+  owner_uid, display_name_snapshot: string
+  status: pending | sent | failed
+  channel_id?, message_id?, error_code?, http_status?
+  created_at, attempted_at: timestamp
+emergency_events/{event_id}/updates/discord_{interaction_id}:   # 返信（interaction id で冪等）
+  type: friend_comment, author_type: friend, source: discord
+  author_uid: null, author_name: string, author_discord_user_id: string
+  text: string (<= 500), payload: null, created_at, delivered_to_ai_at: null
+```
+
+| API | 認証 | 役割 |
+| --- | --- | --- |
+| `POST /v1/discord/invites` | Firebase | 招待 URL（`/v1/discord/invite/{invite_id}.{token}`）と期限を返す |
+| `GET /v1/discord/invite/{id}.{token}` | なし（トークン） | 共有内容と同意事項を示す HTML。「同意して Discord で本人確認」で OAuth（`identify`）へ |
+| `GET /v1/discord/oauth/callback` | OAuth `state`（`uid.invite_id.token`） | code 交換→`/users/@me`→transaction で招待を使用済み化し連絡先を `active` 作成。OAuth token は保存しない |
+| `GET /v1/discord/contacts` | Firebase | 自分の `active` 連絡先一覧 |
+| `DELETE /v1/discord/contacts/{id}` | Firebase | `revoked` へ |
+| `POST /v1/discord/contacts/{id}/test` | Firebase | Bot のテスト DM（ボタン `ack:{uid}`）を送り `last_test_dm` を記録 |
+| `POST /v1/discord/interactions` | Ed25519 署名 | PING→PONG。`ack:*`→`acknowledged_at`。`reply:{event_id}`→モーダル。モーダル送信→宛先照合後 `updates` へ保存 |
+
+イベント作成時（`POST /v1/emergency-events` の新規作成）に、電話発信と独立して非同期で `active` 連絡先ごとに `discord_notifications` を `create`（既存なら送らない）してから DM を送る。DM 失敗は電話に影響させない。DM 本文は「LIFELiNK 緊急連絡」「発信者名」「都道府県・取得時刻」「状況メモ」のみ。
+
 ### 実装しない場合の注記
 
 UI 全体の完成形を先に見る価値はあるが、電話と iBeacon の実機検証を先に終える。Discord 個別 DM はその直後に先行検証し、録音や LIFELiNK 同士の共有 UI は後続とする。
@@ -267,6 +306,28 @@ flowchart LR
 - `address`（都道府県レベル、Android の `Geocoder.adminArea` で解決）
 - `captured_at`
 - `geocoded_at`
+
+### `users/{uid}/linkedTriggers/{trigger_id}`（設計メモ、2026-09-26、1a 章の不足 1 への対応、未実装）
+
+現状 Android は物理ボタン（iBeacon）のリンク情報を端末ローカルにのみ保存しており、`users/{uid}` 側には同期されていない（1a 章参照）。次にこの部分へ着手する場合の想定スキーマを残す。**この節は設計のみで、`backend/src/server.ts` 等のコード実装はまだ行っていない**（Discord 主線の作業と衝突しないよう、今回は文書化のみに留める）。
+
+```yaml
+users/{uid}/linkedTriggers/{trigger_id}:
+  type: beacon | gatt
+  # type: beacon の場合、リンク時に観測したスロットの一覧（6b 章の複数スロット対応）
+  beacon_slots: [{ uuid: string, major_masked: integer, minor: integer }] | null
+  # type: gatt の場合、再接続対象デバイスの識別子（MAC アドレスではなく端末内で安定した識別子を検討）
+  gatt_device_identity: string | null
+  label: string          # ユーザー向け表示名（例: 「リビングのボタン」）
+  linked_at: timestamp
+  relinked_at: timestamp | null
+  status: active | unlinked
+```
+
+- BLE アドレスは 6b 章の方針どおり同期しない（アドレスは端末内の識別補助に限定し、backend へは送らない）。
+- 1 ユーザーが複数の物理ボタンをリンクできる前提（`trigger_id` を複数保持）で設計する。単一固定の前提は置かない。
+- 解除・再登録は同じ `trigger_id` の `status` を `unlinked` にしてから新しい document を作る（上書きせず履歴を残す）か、`relinked_at` を更新して同一 document を使い回すかは実装時に選ぶ。どちらでも「今有効なリンクは `status: active` の 1 件」という不変条件は崩さない。
+- API 境界案（9 章）に `POST /v1/linked-triggers`・`DELETE /v1/linked-triggers/{id}` を追加する想定。今回はまだ 9 章へ反映しない（Discord 主線を止めないため、実装着手時に追記する）。
 
 ### `emergency_events/{emergency_event_id}`
 
@@ -389,16 +450,10 @@ Braveridge「＋Beacon ボタン」製品仕様書 Version 1.0.0 により、製
 - **実測・画面 OFF 時の受信空白（2026-09-26 12:04〜12:17、P3-03 フェーズ1、adb で画面 OFF 60 秒/ON 15 秒×10 回、ボタン無操作、USB 充電中）**: 待機スロットは約 1 秒ごとに広告しているが、画面 OFF 中に届いたのは 60 秒あたり 5〜14 パケットだけで、受信は数秒のまとまりと 10〜23 秒の空白を繰り返した。画面 OFF 直後の最初の受信まで 0.2〜22.5 秒、各回の最大空白 11.0〜23.1 秒。画面 ON 中（ロック画面が 5〜8 秒で自動消灯するまで）は 1 秒ごとに届く。この受信時刻から推定すると、画面 OFF 中に押した 10 秒バーストが 1 パケットも届かない確率は **約 15%**、30 秒バーストなら 0%。つまり 11:37〜11:41 の 10/10 は偶然に近く、11:50:39 の取りこぼしはこの空白によるもの。USB 非接続時はさらに悪化する可能性がある。
 - **決定（2026-09-26、人間確認済み・案 A）**: 確実さを優先して送信時間を **60 秒**（途切れ判定 75 秒）に戻す。アプリの既定値も 60 秒。発信条件は引き続き「ボタン1/2・短押し/長押しの全 4 パターンで待機以外へ変わった瞬間に即発信」（60 秒中でも別ボタン・短押し↔長押しの切替は即発火）。デモで連続して押す場合は別のボタン（別個体）を使う。
 
-専用 UUID/Major/Minor は次のとおり確定済み（2026-09-26、Agent が生成し本節へ記録）。この値は今後変更しない固定識別子として扱い、`BeaconReceiver` の `ScanFilter` はこの完全一致だけを受理する（ワイルドカードや部分一致は実装しない）。
-
-- UUID: `BB192440-9E4F-497D-8ACE-7B2BA67CC2FE`
-- Major: `11665`
-- Minor: `31295`
-
-2026-09-26 にSamsung物理端末のdebug scanで、manufacturer company ID `0x004C`、iBeacon prefix `0x02 0x15`として同じUUID/Major/Minorを2回観測して確定した。生成した仮値ではなく、物理ボタンが実際に広告するbyte列を正とする。
+**訂正（2026-09-26）**: 以前ここに「専用 UUID/Major/Minor を全ユーザー共通の固定値として確定する」という記述があったが、これは誤りだったため削除した。実測の結果 `BB192440-...`/Major `11665`/Minor `31295`（Beacon0）は待機広告であり、ボタン押下ではなくボタンを押していない待機中に常時送信される値だと判明した。正しい発信トリガー規則は本節前段の「新しい発信トリガー規則（利用者ごとの登録）」のとおりで、固定 UUID は持たず、ユーザーごとにリンク時へ観測したスロット（UUID・Major 下位 14bit・Minor）を保存し、そのスロットへ一致し、かつ Major bit14（長押し）が立つ広告だけを発信候補にする。
 
 ```text
-長押し -> 専用 UUID/Major/Minor を広告
+長押し -> リンク済みスロットの UUID/Major/Minor を広告
   -> Android の厳密 Filter/PendingIntent で受信
   -> BeaconReceiver で ID・鮮度・重複を検証
   -> Safety gate
@@ -406,13 +461,15 @@ Braveridge「＋Beacon ボタン」製品仕様書 Version 1.0.0 により、製
 
 - Beacon 広告にはイベントごとの ACK がないため、同じ広告の複数受信は一回の押下として重複排除する。
 - Android の Beacon 経路はドライラン（発信しない）を既定値とし、画面のスイッチで明示的に OFF にした時だけ実発信する。ドライラン中も重複排除までは本番と同じ処理を通し、「本番なら発信候補」になったバーストを診断ログへ記録する。
-- ボタン操作と UUID/Major/Minor の対応を確定するため、Android は BLE アドレスごとの iBeacon 識別値の変化を「Beacon状態遷移ログ」へ時刻付きで記録する（プロセス内メモリのみ、最大100件、backend へ送らない）。
+- リンク・再リンクの実測手順は本節前段のとおり: ユーザーがボタン1/2を一度ずつ短押ししてから登録する。Android は受信した iBeacon 識別値の変化を「Beacon状態遷移ログ」へ時刻付きで記録する（プロセス内メモリのみ、最大100件、backend へ送らない）。
 - 画面 ON で確実に動く退避経路として保持し、ロック中の配送保証には使わない（ロック中の確実な配送は GATT 側の役割）。
 - 使用箇所は `core` の iBeacon parser / `EventGate` と、`bluetooth` の `BeaconReceiver` / Filter / PendingIntent とする。
 
-### GATT 経路（主経路、Beacon 完動後に追加）
+### GATT 経路（ストレッチゴール、最優先度は最低、Beacon 完動後かつ時間が余った場合のみ着手）
 
-GATT Notify を物理ボタンの主経路とする。XIAO nRF52840 が Peripheral/GATT server、Android が Central/GATT client となる。
+**2026-09-26 決定**: iBeacon（+Beacon PB-BTN-01）による物理ボタン経路が実機で動作したため、GATT は主経路ではなくなった。GATT は「ロック中も押下ごとに確実な配送・ACK が欲しい」場合の将来の改善案として設計だけ残し、**ハッカソン提出のスコープでは他のすべての作業（Discord 個別連絡、Full UI、P2 状況ストア、失敗系の P3 検証）より優先度を下げる**。着手するのは、それらが完了してなお時間が余った場合に限る。
+
+GATT Notify を物理ボタンの補助経路とする。XIAO nRF52840 が Peripheral/GATT server、Android が Central/GATT client となる。
 
 ```text
 準備: Android scan -> connect -> service discovery -> Notify 購読 -> READY
@@ -706,6 +763,7 @@ value: map
 source:
   actor: android | backend | user | friend | provider | system
   actor_id: string | null
+  actor_name: string | null   # 2026-09-26 追加。友人等を名前で回答するための表示名denormalize
   provider: string | null
 observed_at: timestamp
 received_at: timestamp
@@ -725,7 +783,7 @@ created_at: timestamp
 
 ```yaml
 # kind: location
-value: { prefecture: string, latitude: null, longitude: null } # 8 章の方針により座標は常に null、都道府県のみ
+value: { prefecture: string, latitude: null, longitude: null, accuracy_m: number | null } # 8 章の方針により座標は常に null。精度(accuracy_m)は位置そのものを明かさない数値なので保持する（1a 章の不足指摘への対応、2026-09-26）
 # kind: address
 value: { text: string, provider: string }
 # kind: user_note
@@ -748,7 +806,7 @@ value: { twilio_status: string }
 version: integer
 last_sequence: integer
 generated_at: timestamp
-location: { fact_id: string | null, prefecture: string | null, observed_at: timestamp | null, freshness: fresh|stale|unavailable }
+location: { fact_id: string | null, prefecture: string | null, accuracy_m: number | null, observed_at: timestamp | null, freshness: fresh|stale|unavailable }
 address: { fact_id: string | null, text: string | null, provider: string | null, resolved_at: timestamp | null }
 situation: { summary: string, fact_ids: [string], confidence: number | null }
 user_notes: { latest_text: string | null, fact_ids: [string] }
@@ -1005,7 +1063,7 @@ Android fact が Firestore へ一度だけ保存され `state/current` へ反映
 
 World ID / IDKit は延期機能ではなく、実通話前の発信認可として実装する。`world-id-idkit` Skill と Developer Portal MCP を使い、RP signing key は会話やログを経由させず Secret Manager へ直接保存する。
 
-### Phase 7: GATT 移行（Beacon 完動後）
+### Phase 7: GATT 移行（ストレッチゴール、最優先度は最低。Beacon 完動・Discord・Full UI・P2・P3 が片付き、時間が余った場合のみ）
 
 - GATT 経路（6b 章）を追加し、`trigger_source: gatt` を Safety gate へ接続する。
 - `CONNECTED -> SUBSCRIBED -> READY` の接続維持、epoch/eventId によるイベント検証、ACK 処理を実装する。
