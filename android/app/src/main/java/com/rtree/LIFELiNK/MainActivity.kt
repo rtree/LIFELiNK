@@ -585,6 +585,29 @@ private fun DiscordContactsSection(apiClient: LifeLinkApiClient) {
 
     HorizontalDivider()
     Text("Discord の緊急連絡先", style = MaterialTheme.typography.titleLarge)
+    Text(
+        "登録手順\n" +
+            "1. Discord で LIFELiNK 用のサーバーを作る（左の「＋」→「オリジナルの作成」→「自分と友達のため」）。既存の自分のサーバーでも可\n" +
+            "2. 下の「Bot をサーバーに追加」を押し、1 のサーバーを選んで「認証」（Bot と相手が同じサーバーにいないと DM が届きません：エラー 50278）\n" +
+            "3. 連絡してほしい友人を 1 のサーバーに招待して参加してもらう\n" +
+            "4. 「招待を作成」で URL を友人に送る → 友人が開いて「同意して Discord で本人確認」→「登録が完了しました」\n" +
+            "5. 「更新」で友人が一覧に出たら「テスト DM」→ 友人が DM の「受信を確認」を押す →「到達確認済み」になれば完了\n" +
+            "緊急発信すると友人に DM が届き、「状況を返信」の内容は通話中の AI に伝わります",
+        style = MaterialTheme.typography.bodySmall,
+    )
+    Button(
+        modifier = Modifier.fillMaxWidth(),
+        onClick = {
+            context.startActivity(
+                Intent(
+                    Intent.ACTION_VIEW,
+                    Uri.parse("https://discord.com/oauth2/authorize?client_id=1553217776179486882&scope=bot&permissions=0&integration_type=0"),
+                ),
+            )
+        },
+    ) {
+        Text("Bot をサーバーに追加")
+    }
     Text(statusText, style = MaterialTheme.typography.bodySmall)
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Button(

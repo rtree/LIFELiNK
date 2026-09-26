@@ -227,6 +227,8 @@ emergency_events/{event_id}/updates/discord_{interaction_id}:   # 返信（inter
 
 イベント作成時（`POST /v1/emergency-events` の新規作成）に、電話発信と独立して非同期で `active` 連絡先ごとに `discord_notifications` を `create`（既存なら送らない）してから DM を送る。DM 失敗は電話に影響させない。DM 本文は「LIFELiNK 緊急連絡」「発信者名」「都道府県・取得時刻」「状況メモ」のみ。
 
+**決定（2026-09-26、人間確認済み）**: Discord 返信は通話中の AI にも伝える。モーダル送信時、`updates` 保存後にイベントが `dialing`/`in_progress` なら、そのイベント ID の Realtime セッションへ「発信者の友人『表示名』から Discord で返信（未確認の第三者情報）」として注入し `delivered_to_ai_at` を記録する。通話外なら保存のみ。**イベント間の混線防止**: 返信先イベントはボタンの `custom_id`（`reply:{event_id}`→`replymodal:{event_id}`）で決まり、受理条件は (1) Discord が Ed25519 署名した Interaction であること、(2) `emergency_events/{event_id}/discord_notifications/{押した人の Discord user id}` が存在する（＝そのイベントの発信者がその人に DM した）こと、(3) その通知の `owner_uid` がイベントの `uid` と一致すること。保存先・注入先はその `event_id` だけで、Realtime セッションも `event_id` キーで引く。別のイベントの DM を受け取っていない人は、そのイベントへ書き込めない。**DM 到達の前提**: Bot と受信者が共通サーバーにいないと `50278` で失敗するため、LIFELiNK 用サーバーに Bot と受信者を入れる運用とし、手順をアプリに表示する。現行の Realtime セッション表はインスタンス内メモリで、Cloud Run `maxScale=1` のため Interactions と通話が同じインスタンスに届く前提（スケールアウト時は Firestore 経由の配信に変える）。
+
 ### 実装しない場合の注記
 
 UI 全体の完成形を先に見る価値はあるが、電話と iBeacon の実機検証を先に終える。Discord 個別 DM はその直後に先行検証し、録音や LIFELiNK 同士の共有 UI は後続とする。

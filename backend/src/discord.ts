@@ -7,6 +7,7 @@ import { z } from "zod";
 
 import { authenticate } from "./auth.js";
 import { config } from "./config.js";
+import { injectEmergencyUpdate } from "./voice.js";
 
 const DISCORD_API = "https://discord.com/api/v10";
 const INVITE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -323,21 +324,27 @@ export function registerDiscordRoutes(app: FastifyInstance, db: Firestore) {
       if (interaction.type === 5 && customId.startsWith("replymodal:")) {
         const eventId = customId.slice(11);
         const eventRef = db.collection("emergency_events").doc(eventId);
-        const notification = await eventRef.collection("discord_notifications").doc(user.id).get();
-        if (!notification.exists) return ephemeral("このイベントへの返信は許可されていません。");
-        const text: string = interaction.data?.components?.[0]?.components?.[0]?.value ?? "";
-        if (!text.trim()) return ephemeral("返信が空です。");
-        await eventRef
-          .collection("updates")
-          .doc(`discord_${interaction.id}`)
+        const [event, notification] = await Promise.all([
+          eventRef.get(),
+          eventRef.collection("discord_notifications").doc(user.id).get(),
+        ]);
+        // A reply is accepted only for the event whose owner actually DM'd this Discord user.
+        if (!event.exists || !notification.exists || notification.get("owner_uid") !== event.get("uid")) {
+          return ephemeral("このイベントへの返信は許可されていません。");
+        }
+        const text: string = (interaction.data?.components?.[0]?.components?.[0]?.value ?? "").trim().slice(0, REPLY_MAX_LENGTH);
+        if (!text) return ephemeral("返信が空です。");
+        const authorName = (notification.get("display_name_snapshot") as string) ?? user.username;
+        const updateRef = eventRef.collection("updates").doc(`discord_${interaction.id}`);
+        await updateRef
           .create({
             type: "friend_comment",
             author_type: "friend",
             source: "discord",
             author_uid: null,
-            author_name: (notification.get("display_name_snapshot") as string) ?? user.username,
+            author_name: authorName,
             author_discord_user_id: user.id,
-            text: text.slice(0, REPLY_MAX_LENGTH),
+            text,
             payload: null,
             created_at: FieldValue.serverTimestamp(),
             delivered_to_ai_at: null,
@@ -345,7 +352,20 @@ export function registerDiscordRoutes(app: FastifyInstance, db: Firestore) {
           .catch((error: { code?: number }) => {
             if (error.code !== 6) throw error;
           });
-        return ephemeral("返信を記録しました。ありがとうございます。");
+
+        const callActive = new Set(["dialing", "in_progress"]).has(event.get("state") as string);
+        const delivered =
+          callActive &&
+          injectEmergencyUpdate(
+            eventId,
+            `発信者の友人「${authorName}」から Discord で返信がありました（未確認の第三者情報として伝えてください）: ${text}`,
+          );
+        if (delivered) await updateRef.update({ delivered_to_ai_at: FieldValue.serverTimestamp() });
+        return ephemeral(
+          delivered
+            ? "返信を記録し、通話中の AI に伝えました。ありがとうございます。"
+            : "返信を記録しました（通話は既に終了しているか、まだつながっていません）。",
+        );
       }
 
       return ephemeral("この操作には対応していません。");
