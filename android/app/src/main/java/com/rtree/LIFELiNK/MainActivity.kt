@@ -21,16 +21,21 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -43,6 +48,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.credentials.CredentialManager
@@ -70,8 +76,11 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            MaterialTheme {
-                Surface(modifier = Modifier.fillMaxSize()) {
+            LifeLinkTheme {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background,
+                ) {
                     SetupScreen()
                 }
             }
@@ -89,29 +98,30 @@ private fun SetupScreen() {
     val initialUser = FirebaseAuth.getInstance().currentUser
     var status by remember {
         mutableStateOf(
-            initialUser?.let { "ログイン済み: ${it.email ?: it.uid}" }
-                ?: "Googleでログインしてください",
+            initialUser?.let { "Signed in as ${it.email ?: it.uid}" }
+                ?: "Sign in with Google to get started",
         )
     }
     var signedInUid by remember { mutableStateOf(initialUser?.uid) }
-    var worldIdStatus by remember { mutableStateOf("World ID人間証明は未完了です") }
+    var worldIdStatus by remember { mutableStateOf("Not verified yet") }
+    var worldIdVerified by remember { mutableStateOf(false) }
     var pendingWorldIdFlowId by remember { mutableStateOf(emergencyPreferences.worldIdFlowId) }
-    var locationText by remember { mutableStateOf("位置情報はまだ保存されていません") }
+    var locationText by remember { mutableStateOf("No location saved yet") }
     var currentLocation by remember { mutableStateOf(emergencyPreferences.location) }
     var contactName by remember { mutableStateOf("") }
     var contactPhone by remember { mutableStateOf("") }
     var contactId by remember { mutableStateOf(emergencyPreferences.contactId) }
     var contactText by remember {
         mutableStateOf(
-            emergencyPreferences.maskedContact?.let { "登録済み: $it" }
-                ?: "緊急連絡先は未登録です",
+            emergencyPreferences.maskedContact?.let { "Registered: $it" }
+                ?: "No emergency contact yet",
         )
     }
     var initialNote by remember { mutableStateOf("") }
     var armedAt by remember { mutableStateOf<Long?>(null) }
-    var emergencyText by remember { mutableStateOf("緊急発信は待機中です") }
+    var emergencyText by remember { mutableStateOf("Ready") }
     var activeEmergencyEventId by remember { mutableStateOf<String?>(null) }
-    var beaconText by remember { mutableStateOf("Beacon監視は停止中です") }
+    var beaconText by remember { mutableStateOf("Button watch is off") }
     var linkedTriggerDevice by remember { mutableStateOf(emergencyPreferences.linkedTriggerDevice) }
     val observedAdvertisements by AdvertisementRegistry.observations.collectAsStateWithLifecycle()
     val beaconLog by AdvertisementRegistry.beaconLog.collectAsStateWithLifecycle()
@@ -120,7 +130,8 @@ private fun SetupScreen() {
     LaunchedEffect(initialUser?.uid) {
         val claims = initialUser?.getIdToken(false)?.await()?.claims.orEmpty()
         if (claims["human_verified"] == true) {
-            worldIdStatus = "World ID人間証明済み"
+            worldIdStatus = "Verified as a unique human"
+            worldIdVerified = true
         }
     }
 
@@ -133,10 +144,10 @@ private fun SetupScreen() {
                 if (error is ApiException && error.statusCode in setOf(404, 410)) {
                     emergencyPreferences.worldIdFlowId = null
                     pendingWorldIdFlowId = null
-                    worldIdStatus = "World ID証明の有効期限が切れました。もう一度お試しください"
+                    worldIdStatus = "The verification request expired. Please try again."
                     return@LaunchedEffect
                 }
-                worldIdStatus = "通信が一時的に不安定です。自動で再試行しています"
+                worldIdStatus = "Connection is unstable. Retrying automatically."
                 delay(WORLD_ID_STATUS_POLL_INTERVAL_MS)
                 continue
             }
@@ -145,17 +156,18 @@ private fun SetupScreen() {
                     FirebaseAuth.getInstance().currentUser?.getIdToken(true)?.await()
                     emergencyPreferences.worldIdFlowId = null
                     pendingWorldIdFlowId = null
-                    worldIdStatus = "World ID人間証明済み"
+                    worldIdStatus = "Verified as a unique human"
+                    worldIdVerified = true
                     return@LaunchedEffect
                 }
                 "failed" -> {
                     emergencyPreferences.worldIdFlowId = null
                     pendingWorldIdFlowId = null
-                    worldIdStatus = "World ID証明失敗: ${flowStatus.error ?: "unknown"}"
+                    worldIdStatus = "Verification failed: ${flowStatus.error ?: "unknown"}"
                     return@LaunchedEffect
                 }
-                "waiting_for_connection" -> worldIdStatus = "World Appの接続を待っています"
-                "awaiting_confirmation" -> worldIdStatus = "World Appで確認中です"
+                "waiting_for_connection" -> worldIdStatus = "Waiting for World App to connect"
+                "awaiting_confirmation" -> worldIdStatus = "Confirm the request in World App"
             }
             delay(WORLD_ID_STATUS_POLL_INTERVAL_MS)
         }
@@ -167,12 +179,12 @@ private fun SetupScreen() {
         if (BeaconTriggerManager.hasPermission(context)) {
             BeaconMonitorService.start(context)
             beaconText = if (grants[Manifest.permission.POST_NOTIFICATIONS] == false) {
-                "見守り開始（通知権限が拒否されたため常駐通知が見えません）"
+                "Watch started (notifications denied, so the ongoing notice is hidden)"
             } else {
-                "見守りを開始しました"
+                "Watch started"
             }
         } else {
-            beaconText = "Bluetooth scan権限が拒否されました"
+            beaconText = "Bluetooth scan permission was denied"
         }
     }
     val monitoringRunning by BeaconMonitorService.running.collectAsStateWithLifecycle()
@@ -198,13 +210,13 @@ private fun SetupScreen() {
                 runCatching {
                     apiClient.sendLocationUpdate(eventId, location)
                 }.onSuccess {
-                    locationText += "\n通話中のAIへ位置更新を送信しました"
+                    locationText += "\nSent the location update to the AI on the call"
                 }.onFailure { error ->
-                    locationText += "\nAIへの位置更新失敗: ${error.userMessage()}"
+                    locationText += "\nCould not send the location update: ${error.userMessage()}"
                 }
             }
         }.onFailure { error ->
-            locationText = "位置保存失敗: ${error.userMessage()}"
+            locationText = "Could not save the location: ${error.userMessage()}"
         }
     }
 
@@ -218,356 +230,512 @@ private fun SetupScreen() {
                 captureAndSaveLocation()
             }
         } else {
-            locationText = "位置情報の権限が拒否されました"
+            locationText = "Location permission was denied"
         }
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Text("LIFELiNK", style = MaterialTheme.typography.headlineLarge)
-        Text("You are never alone.", style = MaterialTheme.typography.bodyLarge)
-        Spacer(Modifier.height(20.dp))
-        Text(status)
-        Spacer(Modifier.height(12.dp))
-        Button(
-            modifier = Modifier.fillMaxWidth(),
-            onClick = {
-                scope.launch {
-                    status = signInWithGoogle(context)
-                    signedInUid = FirebaseAuth.getInstance().currentUser?.uid
-                }
-            },
-        ) {
-            Text("Googleでログイン")
-        }
-        Text(worldIdStatus)
-        Button(
-            modifier = Modifier.fillMaxWidth(),
-            enabled = FirebaseAuth.getInstance().currentUser != null,
-            onClick = {
-                scope.launch {
-                    runCatching {
-                        val flow = apiClient.startWorldIdFlow()
-                        emergencyPreferences.worldIdFlowId = flow.flowId
-                        pendingWorldIdFlowId = flow.flowId
-                        openWorldIdConnector(context, flow.connectorUri)
-                        worldIdStatus = "World Appで人間証明を完了してください"
-                    }.onFailure { error ->
-                        worldIdStatus = "World ID証明失敗: ${error.userMessage()}"
-                    }
-                }
-            },
-        ) {
-            Text("World IDで人間証明")
-        }
-        Spacer(Modifier.height(12.dp))
-        Text(locationText)
-        Spacer(Modifier.height(12.dp))
-        Button(
-            modifier = Modifier.fillMaxWidth(),
-            onClick = {
-                val hasLocationPermission = ContextCompat.checkSelfPermission(
-                    context,
-                    Manifest.permission.ACCESS_FINE_LOCATION,
-                ) == PackageManager.PERMISSION_GRANTED || ContextCompat.checkSelfPermission(
-                    context,
-                    Manifest.permission.ACCESS_COARSE_LOCATION,
-                ) == PackageManager.PERMISSION_GRANTED
+    var tab by remember { mutableStateOf(AppTab.HOME) }
+    var beaconBurstSeconds by remember { mutableStateOf(emergencyPreferences.beaconBurstSeconds) }
 
-                if (hasLocationPermission) {
-                    scope.launch {
-                        captureAndSaveLocation()
-                    }
-                } else {
-                    requestLocationPermission.launch(
-                        arrayOf(
-                            Manifest.permission.ACCESS_FINE_LOCATION,
-                            Manifest.permission.ACCESS_COARSE_LOCATION,
-                        ),
+    Scaffold(
+        topBar = {
+            Column(modifier = Modifier.statusBarsPadding()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 10.dp),
+                ) {
+                    Text(
+                        "LIFELiNK",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Text(
+                        "You are never alone.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-            },
-        ) {
-            Text("現在位置を取得して保存")
-        }
-        Spacer(Modifier.height(12.dp))
-        Text(contactText)
-        OutlinedTextField(
-            modifier = Modifier.fillMaxWidth(),
-            value = contactName,
-            onValueChange = { contactName = it },
-            label = { Text("連絡先名") },
-            singleLine = true,
-        )
-        OutlinedTextField(
-            modifier = Modifier.fillMaxWidth(),
-            value = contactPhone,
-            onValueChange = { contactPhone = it },
-            label = { Text("電話番号（+81...）") },
-            singleLine = true,
-        )
-        Button(
-            modifier = Modifier.fillMaxWidth(),
-            enabled = contactName.isNotBlank() && contactPhone.isNotBlank(),
-            onClick = {
-                scope.launch {
-                    runCatching {
-                        apiClient.createContact(contactName, contactPhone)
-                    }.onSuccess { contact ->
-                        contactId = contact.contactId
-                        emergencyPreferences.contactId = contact.contactId
-                        emergencyPreferences.maskedContact = "$contactName / ${contact.maskedPhone}"
-                        contactText = "登録済み: $contactName / ${contact.maskedPhone}"
-                    }.onFailure { error ->
-                        contactText = "連絡先登録失敗: ${error.userMessage()}"
-                    }
-                }
-            },
-        ) {
-            Text("緊急連絡先を登録")
-        }
-        DiscordContactsSection(apiClient = apiClient)
-        OutlinedTextField(
-            modifier = Modifier.fillMaxWidth(),
-            value = initialNote,
-            onValueChange = { initialNote = it },
-            label = { Text("状況メモ（任意）") },
-        )
-        Text(emergencyText)
-        Button(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(64.dp),
-            enabled = contactId != null,
-            onClick = {
-                val now = SystemClock.elapsedRealtime()
-                val armed = armedAt
-                if (armed == null || now - armed > EMERGENCY_CONFIRM_WINDOW_MS) {
-                    armedAt = now
-                    emergencyText = "10秒以内にもう一度押すと発信します"
-                    return@Button
-                }
-
-                armedAt = null
-                val selectedContactId = contactId ?: return@Button
-                val attempt = safetyGate.begin(selectedContactId)
-                emergencyText = if (attempt.isRetry) {
-                    "同じ発信要求を再送しています"
-                } else {
-                    "発信を開始しています"
-                }
-                scope.launch {
-                    runCatching {
-                        apiClient.createEmergencyEvent(
-                            eventId = attempt.eventId,
-                            contactId = selectedContactId,
-                            trigger = ScreenButtonEmergencyTrigger,
-                            location = currentLocation,
-                            initialNote = initialNote,
+                TabRow(selectedTabIndex = tab.ordinal) {
+                    AppTab.entries.forEach { entry ->
+                        Tab(
+                            selected = tab == entry,
+                            onClick = { tab = entry },
+                            text = { Text(entry.label) },
                         )
-                    }.onSuccess { event ->
-                        emergencyText = "発信状態: ${event.state}"
-                        if (event.state in TERMINAL_EVENT_STATES) {
-                            safetyGate.clear(event.eventId)
-                            activeEmergencyEventId = null
-                            return@onSuccess
-                        }
-                        activeEmergencyEventId = event.eventId
-                        while (event.state !in TERMINAL_EVENT_STATES) {
-                            delay(EVENT_STATUS_POLL_INTERVAL_MS)
-                            val latest = runCatching {
-                                apiClient.getEmergencyEvent(event.eventId)
-                            }.getOrElse { error ->
-                                emergencyText = "状態確認失敗（再試行します）: ${error.userMessage()}"
-                                continue
-                            }
-                            emergencyText = "発信状態: ${latest.state}"
-                            if (latest.state in TERMINAL_EVENT_STATES) {
-                                safetyGate.clear(event.eventId)
-                                activeEmergencyEventId = null
-                                break
-                            }
-                        }
-                    }.onFailure { error ->
-                        if (error is ApiException && error.statusCode in 400..499) {
-                            safetyGate.clear(attempt.eventId)
-                        }
-                        emergencyText = "発信失敗: ${error.userMessage()}"
                     }
-                }
-            },
-        ) {
-            Text(if (armedAt == null) "緊急発信" else "発信を確定")
-        }
-        Button(
-            modifier = Modifier.fillMaxWidth(),
-            enabled = activeEmergencyEventId != null && initialNote.isNotBlank(),
-            onClick = {
-                val eventId = activeEmergencyEventId ?: return@Button
-                val note = initialNote
-                scope.launch {
-                    runCatching {
-                        apiClient.sendNoteUpdate(eventId, note)
-                    }.onSuccess {
-                        initialNote = ""
-                        emergencyText = "追加メモを通話中のAIへ送信しました"
-                    }.onFailure { error ->
-                        emergencyText = "追加メモ送信失敗: ${error.userMessage()}"
-                    }
-                }
-            },
-        ) {
-            Text("通話中メモを送信")
-        }
-        Spacer(Modifier.height(12.dp))
-        EmergencyFeedSection(uid = signedInUid)
-        Spacer(Modifier.height(12.dp))
-        Text(beaconText)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Text(
-                if (beaconDryRun) "Beaconドライラン: ON（発信しません）" else "Beaconドライラン: OFF（実発信します）",
-                color = if (beaconDryRun) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error,
-            )
-            Switch(
-                checked = beaconDryRun,
-                onCheckedChange = { checked ->
-                    emergencyPreferences.beaconDryRun = checked
-                    beaconDryRun = checked
-                    if (monitoringRunning) BeaconMonitorService.start(context)
-                },
-            )
-        }
-        var beaconBurstSeconds by remember { mutableStateOf(emergencyPreferences.beaconBurstSeconds) }
-        Text("ボタンのアドバタイズ送信時間（メーカーアプリの設定と合わせる）: ${beaconBurstSeconds}秒")
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            listOf(10, 60).forEach { seconds ->
-                Button(
-                    modifier = Modifier.weight(1f),
-                    enabled = beaconBurstSeconds != seconds,
-                    onClick = {
-                        emergencyPreferences.beaconBurstSeconds = seconds
-                        beaconBurstSeconds = seconds
-                        AdvertisementRegistry.appendBeaconLog("送信時間設定=${seconds}秒（途切れ判定 ${seconds + 15}秒）")
-                    },
-                ) {
-                    Text("${seconds}秒")
                 }
             }
-        }
-        Text(
-            if (monitoringRunning) {
-                "見守り中：通知欄に「LIFELiNK 見守り中」が出ている間だけボタンを待ち受けます"
-            } else {
-                "見守り停止中：ボタンを押しても反応しません"
-            },
-            color = if (monitoringRunning) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error,
-        )
-        Button(
-            modifier = Modifier.fillMaxWidth(),
-            enabled = contactId != null,
-            onClick = {
-                if (monitoringRunning) {
-                    BeaconMonitorService.stop(context)
-                    beaconText = "見守りを停止しました"
-                    return@Button
-                }
-                val permissions = buildList {
-                    add(
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                            Manifest.permission.BLUETOOTH_SCAN
+        },
+    ) { contentPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(contentPadding)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            when (tab) {
+                AppTab.HOME -> {
+                    ReadinessCard(
+                        signedIn = signedInUid != null,
+                        worldIdVerified = worldIdVerified,
+                        contactRegistered = contactId != null,
+                        buttonLinked = linkedTriggerDevice != null,
+                        watching = monitoringRunning,
+                    )
+                    Text(emergencyText, style = MaterialTheme.typography.titleMedium)
+                    Button(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(96.dp),
+                        enabled = contactId != null,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.error,
+                            contentColor = MaterialTheme.colorScheme.onError,
+                        ),
+                        onClick = {
+                            val now = SystemClock.elapsedRealtime()
+                            val armed = armedAt
+                            if (armed == null || now - armed > EMERGENCY_CONFIRM_WINDOW_MS) {
+                                armedAt = now
+                                emergencyText = "Tap again within 10 seconds to send"
+                                return@Button
+                            }
+
+                            armedAt = null
+                            val selectedContactId = contactId ?: return@Button
+                            val attempt = safetyGate.begin(selectedContactId)
+                            emergencyText = if (attempt.isRetry) {
+                                "Resending the same request"
+                            } else {
+                                "Sending your SOS"
+                            }
+                            scope.launch {
+                                runCatching {
+                                    apiClient.createEmergencyEvent(
+                                        eventId = attempt.eventId,
+                                        contactId = selectedContactId,
+                                        trigger = ScreenButtonEmergencyTrigger,
+                                        location = currentLocation,
+                                        initialNote = initialNote,
+                                    )
+                                }.onSuccess { event ->
+                                    emergencyText = callStateText(event.state)
+                                    if (event.state in TERMINAL_EVENT_STATES) {
+                                        safetyGate.clear(event.eventId)
+                                        activeEmergencyEventId = null
+                                        return@onSuccess
+                                    }
+                                    activeEmergencyEventId = event.eventId
+                                    while (event.state !in TERMINAL_EVENT_STATES) {
+                                        delay(EVENT_STATUS_POLL_INTERVAL_MS)
+                                        val latest = runCatching {
+                                            apiClient.getEmergencyEvent(event.eventId)
+                                        }.getOrElse { error ->
+                                            emergencyText =
+                                                "Checking status failed, retrying: ${error.userMessage()}"
+                                            continue
+                                        }
+                                        emergencyText = callStateText(latest.state)
+                                        if (latest.state in TERMINAL_EVENT_STATES) {
+                                            safetyGate.clear(event.eventId)
+                                            activeEmergencyEventId = null
+                                            break
+                                        }
+                                    }
+                                }.onFailure { error ->
+                                    if (error is ApiException && error.statusCode in 400..499) {
+                                        safetyGate.clear(attempt.eventId)
+                                    }
+                                    emergencyText = "Could not send: ${error.userMessage()}"
+                                }
+                            }
+                        },
+                    ) {
+                        Text(
+                            if (armedAt == null) "SOS" else "Tap again to confirm",
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                    Text(
+                        if (contactId == null) {
+                            "Add an emergency contact in Members before you can send an SOS."
                         } else {
-                            Manifest.permission.ACCESS_FINE_LOCATION
+                            "Tap twice. LIFELiNK calls your contact, an AI explains where you are, " +
+                                "and your Discord members get a DM at the same time."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    OutlinedTextField(
+                        modifier = Modifier.fillMaxWidth(),
+                        value = initialNote,
+                        onValueChange = { initialNote = it },
+                        label = { Text("What is happening? (optional)") },
+                    )
+                    Button(
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = activeEmergencyEventId != null && initialNote.isNotBlank(),
+                        onClick = {
+                            val eventId = activeEmergencyEventId ?: return@Button
+                            val note = initialNote
+                            scope.launch {
+                                runCatching {
+                                    apiClient.sendNoteUpdate(eventId, note)
+                                }.onSuccess {
+                                    initialNote = ""
+                                    emergencyText = "Sent your note to the AI on the call"
+                                }.onFailure { error ->
+                                    emergencyText = "Could not send the note: ${error.userMessage()}"
+                                }
+                            }
+                        },
+                    ) {
+                        Text("Tell the AI on the call")
+                    }
+                    HorizontalDivider()
+                    EmergencyFeedSection(uid = signedInUid)
+                }
+
+                AppTab.MEMBERS -> {
+                    Text("Emergency contact", style = MaterialTheme.typography.titleLarge)
+                    Text(
+                        "This is the phone number LIFELiNK calls. The AI speaks on your behalf.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(contactText)
+                    OutlinedTextField(
+                        modifier = Modifier.fillMaxWidth(),
+                        value = contactName,
+                        onValueChange = { contactName = it },
+                        label = { Text("Name") },
+                        singleLine = true,
+                    )
+                    OutlinedTextField(
+                        modifier = Modifier.fillMaxWidth(),
+                        value = contactPhone,
+                        onValueChange = { contactPhone = it },
+                        label = { Text("Phone number (+81...)") },
+                        singleLine = true,
+                    )
+                    Button(
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = contactName.isNotBlank() && contactPhone.isNotBlank(),
+                        onClick = {
+                            scope.launch {
+                                runCatching {
+                                    apiClient.createContact(contactName, contactPhone)
+                                }.onSuccess { contact ->
+                                    contactId = contact.contactId
+                                    emergencyPreferences.contactId = contact.contactId
+                                    emergencyPreferences.maskedContact =
+                                        "$contactName / ${contact.maskedPhone}"
+                                    contactText = "Registered: $contactName / ${contact.maskedPhone}"
+                                }.onFailure { error ->
+                                    contactText = "Could not register: ${error.userMessage()}"
+                                }
+                            }
+                        },
+                    ) {
+                        Text("Save emergency contact")
+                    }
+                    DiscordContactsSection(apiClient = apiClient)
+                }
+
+                AppTab.SETTINGS -> {
+                    Text("Account", style = MaterialTheme.typography.titleLarge)
+                    Text(status)
+                    Button(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = {
+                            scope.launch {
+                                status = signInWithGoogle(context)
+                                signedInUid = FirebaseAuth.getInstance().currentUser?.uid
+                            }
+                        },
+                    ) {
+                        Text("Sign in with Google")
+                    }
+                    Text(
+                        "Profile (nickname and area): coming soon",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    HorizontalDivider()
+                    Text("Proof of humanity", style = MaterialTheme.typography.titleLarge)
+                    Text(
+                        "World ID proves one real person is behind this account, so an SOS cannot be spammed by bots.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(worldIdStatus)
+                    Button(
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = FirebaseAuth.getInstance().currentUser != null,
+                        onClick = {
+                            scope.launch {
+                                runCatching {
+                                    val flow = apiClient.startWorldIdFlow()
+                                    emergencyPreferences.worldIdFlowId = flow.flowId
+                                    pendingWorldIdFlowId = flow.flowId
+                                    openWorldIdConnector(context, flow.connectorUri)
+                                    worldIdStatus = "Finish the verification in World App"
+                                }.onFailure { error ->
+                                    worldIdStatus = "Verification failed: ${error.userMessage()}"
+                                }
+                            }
+                        },
+                    ) {
+                        Text("Verify with World ID")
+                    }
+
+                    HorizontalDivider()
+                    Text("Location", style = MaterialTheme.typography.titleLarge)
+                    Text(
+                        "Only your prefecture ever leaves this phone. Coordinates are never stored or spoken.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(locationText)
+                    Button(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = {
+                            val hasLocationPermission = ContextCompat.checkSelfPermission(
+                                context,
+                                Manifest.permission.ACCESS_FINE_LOCATION,
+                            ) == PackageManager.PERMISSION_GRANTED || ContextCompat.checkSelfPermission(
+                                context,
+                                Manifest.permission.ACCESS_COARSE_LOCATION,
+                            ) == PackageManager.PERMISSION_GRANTED
+
+                            if (hasLocationPermission) {
+                                scope.launch {
+                                    captureAndSaveLocation()
+                                }
+                            } else {
+                                requestLocationPermission.launch(
+                                    arrayOf(
+                                        Manifest.permission.ACCESS_FINE_LOCATION,
+                                        Manifest.permission.ACCESS_COARSE_LOCATION,
+                                    ),
+                                )
+                            }
+                        },
+                    ) {
+                        Text("Update my location")
+                    }
+
+                    HorizontalDivider()
+                    Text("Physical button", style = MaterialTheme.typography.titleLarge)
+                    Text(beaconText)
+                    Text(
+                        if (monitoringRunning) {
+                            "Watching: your button works while the LIFELiNK notice is in the status bar"
+                        } else {
+                            "Not watching: pressing the button does nothing"
+                        },
+                        color = if (monitoringRunning) {
+                            MaterialTheme.colorScheme.onSurface
+                        } else {
+                            MaterialTheme.colorScheme.error
                         },
                     )
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                        add(Manifest.permission.POST_NOTIFICATIONS)
+                    Button(
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = contactId != null,
+                        onClick = {
+                            if (monitoringRunning) {
+                                BeaconMonitorService.stop(context)
+                                beaconText = "Watch stopped"
+                                return@Button
+                            }
+                            val permissions = buildList {
+                                add(
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                        Manifest.permission.BLUETOOTH_SCAN
+                                    } else {
+                                        Manifest.permission.ACCESS_FINE_LOCATION
+                                    },
+                                )
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                    add(Manifest.permission.POST_NOTIFICATIONS)
+                                }
+                            }
+                            requestBluetoothPermission.launch(permissions.toTypedArray())
+                        },
+                    ) {
+                        Text(if (monitoringRunning) "Stop watching" else "Start watching")
                     }
-                }
-                requestBluetoothPermission.launch(permissions.toTypedArray())
-            },
-        ) {
-            Text(if (monitoringRunning) "見守りを停止" else "見守りを開始（常駐）")
-        }
-        Text(
-            if (ignoringBatteryOptimizations) {
-                "バッテリー最適化: 除外済み"
-            } else {
-                "バッテリー最適化: 未除外（画面ロック中に止められる可能性があります）"
-            },
-            color = if (ignoringBatteryOptimizations) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error,
-        )
-        if (!ignoringBatteryOptimizations) {
-            Button(
-                modifier = Modifier.fillMaxWidth(),
-                onClick = {
-                    openBatterySettings.launch(
-                        Intent(
-                            android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
-                            Uri.parse("package:${context.packageName}"),
-                        ),
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text(
+                            if (beaconDryRun) {
+                                "Dry run: ON (no real call)"
+                            } else {
+                                "Dry run: OFF (a press places a real call)"
+                            },
+                            color = if (beaconDryRun) {
+                                MaterialTheme.colorScheme.onSurface
+                            } else {
+                                MaterialTheme.colorScheme.error
+                            },
+                        )
+                        Switch(
+                            checked = beaconDryRun,
+                            onCheckedChange = { checked ->
+                                emergencyPreferences.beaconDryRun = checked
+                                beaconDryRun = checked
+                                if (monitoringRunning) BeaconMonitorService.start(context)
+                            },
+                        )
+                    }
+                    Text("Button broadcast time (match the vendor app): ${beaconBurstSeconds}s")
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        listOf(10, 60).forEach { seconds ->
+                            Button(
+                                modifier = Modifier.weight(1f),
+                                enabled = beaconBurstSeconds != seconds,
+                                onClick = {
+                                    emergencyPreferences.beaconBurstSeconds = seconds
+                                    beaconBurstSeconds = seconds
+                                    AdvertisementRegistry.appendBeaconLog(
+                                        "Broadcast time set to ${seconds}s (gap threshold ${seconds + 15}s)",
+                                    )
+                                },
+                            ) {
+                                Text("${seconds}s")
+                            }
+                        }
+                    }
+                    Text(
+                        if (ignoringBatteryOptimizations) {
+                            "Battery optimization: excluded"
+                        } else {
+                            "Battery optimization: not excluded (the watch can be killed while locked)"
+                        },
+                        color = if (ignoringBatteryOptimizations) {
+                            MaterialTheme.colorScheme.onSurface
+                        } else {
+                            MaterialTheme.colorScheme.error
+                        },
                     )
-                },
-            ) {
-                Text("バッテリー最適化から除外する")
+                    if (!ignoringBatteryOptimizations) {
+                        Button(
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = {
+                                openBatterySettings.launch(
+                                    Intent(
+                                        android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                                        Uri.parse("package:${context.packageName}"),
+                                    ),
+                                )
+                            },
+                        ) {
+                            Text("Exclude from battery optimization")
+                        }
+                    }
+                    Button(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = {
+                            openBatterySettings.launch(
+                                Intent(
+                                    android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                    Uri.parse("package:${context.packageName}"),
+                                ),
+                            )
+                        },
+                    ) {
+                        Text("Open battery settings")
+                    }
+                    Text(
+                        "On Galaxy: App info > Battery > Unrestricted. Then Settings > Battery > " +
+                            "Background usage limits > Never sleeping apps > add LIFELiNK.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    AdvertisementLinkSection(
+                        observations = observedAdvertisements,
+                        linkedDevice = linkedTriggerDevice,
+                        onLink = { observation ->
+                            emergencyPreferences.linkTrigger(observation)
+                            linkedTriggerDevice = emergencyPreferences.linkedTriggerDevice
+                            if (BeaconTriggerManager.hasPermission(context)) {
+                                BeaconTriggerManager.stop(context)
+                                BeaconTriggerManager.start(context)
+                                beaconText = "Linked and watching (${observation.suggestedTransport?.label})"
+                            }
+                        },
+                        onUnlink = {
+                            emergencyPreferences.linkedTriggerDevice = null
+                            linkedTriggerDevice = null
+                            if (BeaconTriggerManager.hasPermission(context)) {
+                                BeaconTriggerManager.stop(context)
+                                BeaconTriggerManager.start(context)
+                                beaconText = "Unlinked (observing only, no trigger)"
+                            }
+                        },
+                    )
+                    BeaconLogSection(
+                        entries = beaconLog,
+                        onClear = AdvertisementRegistry::clearBeaconLog,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        "Backend: ${BuildConfig.BACKEND_URL}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
-        Button(
-            modifier = Modifier.fillMaxWidth(),
-            onClick = {
-                openBatterySettings.launch(
-                    Intent(
-                        android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                        Uri.parse("package:${context.packageName}"),
-                    ),
-                )
-            },
+    }
+}
+
+@Composable
+private fun ReadinessCard(
+    signedIn: Boolean,
+    worldIdVerified: Boolean,
+    contactRegistered: Boolean,
+    buttonLinked: Boolean,
+    watching: Boolean,
+) {
+    val steps = listOf(
+        "Signed in" to signedIn,
+        "Verified with World ID" to worldIdVerified,
+        "Emergency contact added" to contactRegistered,
+        "Physical button linked" to buttonLinked,
+        "Button watch running" to watching,
+    )
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Text("アプリのバッテリー設定を開く")
+            Text(
+                if (steps.all { it.second }) "You are covered" else "Finish setting up",
+                style = MaterialTheme.typography.titleMedium,
+            )
+            steps.forEach { (label, done) ->
+                Text(
+                    if (done) "\u2713  $label" else "\u2013  $label",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (done) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.error
+                    },
+                )
+            }
         }
-        Text(
-            "Galaxy の場合: アプリ情報 > バッテリー > 「制限なし」を選択。" +
-                "さらに 設定 > バッテリー > バックグラウンド使用制限 > 「スリープしないアプリ」に LIFELiNK を追加してください。",
-            style = MaterialTheme.typography.bodySmall,
-        )
-        AdvertisementLinkSection(
-            observations = observedAdvertisements,
-            linkedDevice = linkedTriggerDevice,
-            onLink = { observation ->
-                emergencyPreferences.linkTrigger(observation)
-                linkedTriggerDevice = emergencyPreferences.linkedTriggerDevice
-                if (BeaconTriggerManager.hasPermission(context)) {
-                    BeaconTriggerManager.stop(context)
-                    BeaconTriggerManager.start(context)
-                    beaconText = "${observation.suggestedTransport?.label}リンク済み・監視中"
-                }
-            },
-            onUnlink = {
-                emergencyPreferences.linkedTriggerDevice = null
-                linkedTriggerDevice = null
-                if (BeaconTriggerManager.hasPermission(context)) {
-                    BeaconTriggerManager.stop(context)
-                    BeaconTriggerManager.start(context)
-                    beaconText = "リンク解除済み（観測のみ、発信トリガーなし）"
-                }
-            },
-        )
-        BeaconLogSection(
-            entries = beaconLog,
-            onClear = AdvertisementRegistry::clearBeaconLog,
-        )
-        Spacer(Modifier.height(12.dp))
-        Text("Backend: ${BuildConfig.BACKEND_URL}", style = MaterialTheme.typography.bodySmall)
     }
 }
 
@@ -576,12 +744,12 @@ private fun DiscordContactsSection(apiClient: LifeLinkApiClient) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var contacts by remember { mutableStateOf<List<DiscordContact>>(emptyList()) }
-    var statusText by remember { mutableStateOf("追加の連絡手段：Discord の DM でも知らせます") }
+    var statusText by remember { mutableStateOf("Members also get a Discord DM when you send an SOS") }
 
     suspend fun refresh() {
         runCatching { apiClient.listDiscordContacts() }
             .onSuccess { contacts = it }
-            .onFailure { statusText = "Discord 連絡先の取得失敗: ${it.userMessage()}" }
+            .onFailure { statusText = "Could not load members: ${it.userMessage()}" }
     }
 
     LaunchedEffect(Unit) {
@@ -589,16 +757,17 @@ private fun DiscordContactsSection(apiClient: LifeLinkApiClient) {
     }
 
     HorizontalDivider()
-    Text("Discord の緊急連絡先", style = MaterialTheme.typography.titleLarge)
+    Text("Discord members", style = MaterialTheme.typography.titleLarge)
     Text(
-        "登録手順\n" +
-            "1. Discord で LIFELiNK 用のサーバーを作る（左の「＋」→「オリジナルの作成」→「自分と友達のため」）。既存の自分のサーバーでも可\n" +
-            "2. 下の「Bot をサーバーに追加」を押し、1 のサーバーを選んで「認証」（Bot と相手が同じサーバーにいないと DM が届きません：エラー 50278）\n" +
-            "3. 連絡してほしい友人を 1 のサーバーに招待して参加してもらう\n" +
-            "4. 「招待を作成」で URL を友人に送る → 友人が開いて「同意して Discord で本人確認」→「登録が完了しました」\n" +
-            "5. 「更新」で友人が一覧に出たら「テスト DM」→ 友人が DM の「受信を確認」を押す →「到達確認済み」になれば完了\n" +
-            "緊急発信すると友人に DM が届き、「状況を返信」の内容は通話中の AI に伝わります",
+        "Setup\n" +
+            "1. Create a Discord server for LIFELiNK (left sidebar “+” > Create My Own > For me and my friends). An existing server works too.\n" +
+            "2. Tap “Add the bot to your server” below and authorize it for that server. The bot and your friend must share a server, otherwise Discord blocks the DM with error 50278.\n" +
+            "3. Invite the friends you want to be notified to that same server.\n" +
+            "4. Tap “Create invite” and send the link. Your friend opens it and confirms their Discord identity.\n" +
+            "5. Tap “Refresh”, then “Test DM”. When your friend taps “Confirm” in the DM, they are ready.\n" +
+            "During an SOS each member gets a DM, and whatever they reply is passed to the AI on the call.",
         style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
     Button(
         modifier = Modifier.fillMaxWidth(),
@@ -611,7 +780,7 @@ private fun DiscordContactsSection(apiClient: LifeLinkApiClient) {
             )
         },
     ) {
-        Text("Bot をサーバーに追加")
+        Text("Add the bot to your server")
     }
     Text(statusText, style = MaterialTheme.typography.bodySmall)
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -621,28 +790,31 @@ private fun DiscordContactsSection(apiClient: LifeLinkApiClient) {
                 scope.launch {
                     runCatching { apiClient.createDiscordInvite() }
                         .onSuccess { url ->
-                            statusText = "招待 URL を作成しました（24 時間有効・1 回限り）。相手に送ってください"
+                            statusText = "Invite created. It is valid for 24 hours and can be used once."
                             context.startActivity(
                                 Intent.createChooser(
                                     Intent(Intent.ACTION_SEND)
                                         .setType("text/plain")
-                                        .putExtra(Intent.EXTRA_TEXT, "LIFELiNK の緊急連絡先への招待です：$url"),
-                                    "招待 URL を共有",
+                                        .putExtra(
+                                            Intent.EXTRA_TEXT,
+                                            "You have been invited to be a LIFELiNK emergency member: $url",
+                                        ),
+                                    "Share the invite",
                                 ),
                             )
                         }
-                        .onFailure { statusText = "招待の作成に失敗: ${it.userMessage()}" }
+                        .onFailure { statusText = "Could not create the invite: ${it.userMessage()}" }
                 }
             },
         ) {
-            Text("招待を作成")
+            Text("Create invite")
         }
         Button(modifier = Modifier.weight(1f), onClick = { scope.launch { refresh() } }) {
-            Text("更新")
+            Text("Refresh")
         }
     }
     if (contacts.isEmpty()) {
-        Text("承認済みの Discord 連絡先はまだいません", style = MaterialTheme.typography.bodySmall)
+        Text("No approved members yet", style = MaterialTheme.typography.bodySmall)
     }
     contacts.forEach { contact ->
         Card(modifier = Modifier.fillMaxWidth()) {
@@ -650,10 +822,11 @@ private fun DiscordContactsSection(apiClient: LifeLinkApiClient) {
                 Text(contact.displayName, style = MaterialTheme.typography.titleMedium)
                 Text(
                     when {
-                        contact.testStatus == null -> "テスト DM 未送信"
-                        contact.testStatus == "failed" -> "テスト DM 送信失敗（Discord エラー ${contact.testErrorCode ?: "不明"}）"
-                        contact.testAcknowledged -> "テスト DM 到達確認済み"
-                        else -> "テスト DM 送信済み（相手の確認待ち）"
+                        contact.testStatus == null -> "Test DM not sent yet"
+                        contact.testStatus == "failed" ->
+                            "Test DM failed (Discord error ${contact.testErrorCode ?: "unknown"})"
+                        contact.testAcknowledged -> "Test DM confirmed"
+                        else -> "Test DM sent, waiting for them to confirm"
                     },
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -663,24 +836,30 @@ private fun DiscordContactsSection(apiClient: LifeLinkApiClient) {
                         onClick = {
                             scope.launch {
                                 statusText = runCatching { apiClient.sendDiscordTest(contact.id) }
-                                    .fold({ "${contact.displayName} にテスト DM を送りました" }, { "テスト DM 失敗: ${it.userMessage()}" })
+                                    .fold(
+                                        { "Sent a test DM to ${contact.displayName}" },
+                                        { "Test DM failed: ${it.userMessage()}" },
+                                    )
                                 refresh()
                             }
                         },
                     ) {
-                        Text("テスト DM")
+                        Text("Test DM")
                     }
                     Button(
                         modifier = Modifier.weight(1f),
                         onClick = {
                             scope.launch {
                                 statusText = runCatching { apiClient.revokeDiscordContact(contact.id) }
-                                    .fold({ "${contact.displayName} を解除しました" }, { "解除失敗: ${it.userMessage()}" })
+                                    .fold(
+                                        { "Removed ${contact.displayName}" },
+                                        { "Could not remove: ${it.userMessage()}" },
+                                    )
                                 refresh()
                             }
                         },
                     ) {
-                        Text("解除")
+                        Text("Remove")
                     }
                 }
             }
@@ -696,24 +875,30 @@ private fun AdvertisementLinkSection(
     onUnlink: () -> Unit,
 ) {
     HorizontalDivider()
-    Text("物理ボタンをリンク", style = MaterialTheme.typography.titleLarge)
+    Text("Link your button", style = MaterialTheme.typography.titleLarge)
     Text(
         linkedDevice?.let { device ->
-            "リンク済み: ${device.transport.label} / ${device.title}\n" +
+            "Linked: ${device.transport.label} / ${device.title}\n" +
                 device.beaconSlots.joinToString("\n") {
-                    "・${it.label}${if (it == device.beaconIdleSlot) "（待機・発信しない）" else "（押下で発信）"}"
+                    "• ${it.label}${if (it == device.beaconIdleSlot) " (idle, never calls)" else " (press calls)"}"
                 } +
-                if (device.transport == TriggerTransport.BEACON && device.beaconIdleSlot == null) "\n※待機スロット未判定のため発信しません。リンクし直してください" else ""
-        } ?: "未リンク: 発信トリガーは無効です。自分のボタンをリンクしてください",
+                if (device.transport == TriggerTransport.BEACON && device.beaconIdleSlot == null) {
+                    "\nThe idle slot was not detected, so nothing will be sent. Please link again."
+                } else {
+                    ""
+                }
+        } ?: "Not linked. Your button cannot trigger an SOS until you link it.",
     )
     Text(
-        "リンク手順: ボタン1とボタン2を一度ずつ短押しし、変化したカードの観測スロットが増えたらリンクします。" +
-            "広告パケット数は押下回数ではありません（1回の押下で約60秒間、1秒ごとに送信）。",
+        "How to link: short-press button 1 and button 2 once each. When the card below shows more " +
+            "observed slots, link it. Packet counts are not press counts — one press broadcasts about " +
+            "once a second for up to 60 seconds.",
         style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
     if (linkedDevice != null) {
         Button(onClick = onUnlink, modifier = Modifier.fillMaxWidth()) {
-            Text("リンクを解除")
+            Text("Unlink")
         }
     }
 
@@ -742,10 +927,13 @@ private fun BeaconLogSection(
     onClear: () -> Unit,
 ) {
     HorizontalDivider()
-    Text("Beaconログ", style = MaterialTheme.typography.titleLarge)
+    Text("Diagnostics", style = MaterialTheme.typography.titleLarge)
     Text(
-        "状態変化・長押し受理・遅延・API所要時間を記録します（新しい順、最大300件。長押しで選択コピー可、同じ内容をlogcatタグ LIFELiNK.BeaconLog にも出力）",
+        "Button state changes, accepted long presses, latency and API timings (newest first, up to " +
+            "300 entries). Long-press to select and copy; the same lines go to the logcat tag " +
+            "LIFELiNK.BeaconLog.",
         style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
     val clipboard = LocalClipboardManager.current
     val logText = entries.joinToString("\n") { "${formatLogTime(it.atMillis)} ${it.text}" }
@@ -754,10 +942,10 @@ private fun BeaconLogSection(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Button(onClick = { clipboard.setText(AnnotatedString(logText)) }, modifier = Modifier.weight(1f)) {
-            Text("ログをコピー")
+            Text("Copy log")
         }
         Button(onClick = onClear, modifier = Modifier.weight(1f)) {
-            Text("ログを消去")
+            Text("Clear log")
         }
     }
     SelectionContainer {
@@ -787,53 +975,53 @@ private fun AdvertisementObservationCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Text(observation.title, style = MaterialTheme.typography.titleMedium)
-                Text("最終 $lastSeenTime")
+                Text("Last seen $lastSeenTime")
             }
             Text(observation.detail, style = MaterialTheme.typography.bodySmall)
             if (observation.beaconSlots.isNotEmpty()) {
                 Text(
-                    "観測スロット ${observation.beaconSlots.size}件（最多パケット=待機）:\n" +
+                    "${observation.beaconSlots.size} observed slots (the busiest one is idle):\n" +
                         observation.beaconSlots.joinToString("\n") { slot ->
-                            "・${slot.label} ×${observation.beaconSlotCounts[slot] ?: 0}" +
-                                if (slot == observation.inferredIdleSlot) " ←待機" else ""
+                            "• ${slot.label} ×${observation.beaconSlotCounts[slot] ?: 0}" +
+                                if (slot == observation.inferredIdleSlot) "  <- idle" else ""
                         },
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
-            Text("RSSI ${observation.rssi} dBm / 広告 ${observation.seenCount}パケット")
+            Text("RSSI ${observation.rssi} dBm / ${observation.seenCount} packets")
             if (observation.beaconLongPress == true) {
-                Text("最新パケット: 長押し")
+                Text("Latest packet: long press")
             }
             if (observation.beaconBatteryLow == true) {
-                Text("電池低下", color = MaterialTheme.colorScheme.error)
+                Text("Battery low", color = MaterialTheme.colorScheme.error)
             }
             val hasNewSlots = linkedDevice != null &&
                 (!linkedDevice.beaconSlots.containsAll(observation.beaconSlots) ||
                     (linkedDevice.transport == TriggerTransport.BEACON && linkedDevice.beaconIdleSlot == null))
             when {
                 hasNewSlots -> {
-                    Text("リンク済み（未登録のスロットあり）")
+                    Text("Linked, but new slots were observed")
                     Button(onClick = onLink, modifier = Modifier.fillMaxWidth()) {
-                        Text("観測スロットでリンクを更新")
+                        Text("Update the link with these slots")
                     }
                 }
-                linkedDevice != null -> Text("リンク済み (${observation.suggestedTransport?.label})")
+                linkedDevice != null -> Text("Linked (${observation.suggestedTransport?.label})")
                 observation.suggestedTransport == TriggerTransport.GATT -> {
                     Button(onClick = onLink, modifier = Modifier.fillMaxWidth()) {
-                        Text("GATT候補としてリンク")
+                        Text("Link as a GATT candidate")
                     }
-                    Text("GATT接続は次段階で有効化します", style = MaterialTheme.typography.bodySmall)
+                    Text("GATT connections are not enabled yet", style = MaterialTheme.typography.bodySmall)
                 }
                 observation.suggestedTransport == TriggerTransport.BEACON -> {
                     Button(onClick = onLink, modifier = Modifier.fillMaxWidth()) {
-                        Text("このBeaconをリンク")
+                        Text("Link this button")
                     }
                     Text(
-                        "リンク後は待機以外のスロット（ボタン1/2、短押し/長押し）へ変わった瞬間に発信します",
+                        "Once linked, an SOS is sent the moment the button leaves its idle slot.",
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
-                else -> Text("観測のみ（リンク非対応）", style = MaterialTheme.typography.bodySmall)
+                else -> Text("Observed only (cannot be linked)", style = MaterialTheme.typography.bodySmall)
             }
         }
     }
@@ -861,9 +1049,9 @@ private suspend fun signInWithGoogle(context: android.content.Context): String {
         val firebaseCredential = GoogleAuthProvider.getCredential(googleCredential.idToken, null)
         val user = FirebaseAuth.getInstance().signInWithCredential(firebaseCredential).await().user
             ?: error("Firebase user was not returned")
-        "ログイン済み: ${user.email ?: user.uid}"
+        "Signed in as ${user.email ?: user.uid}"
     }.getOrElse { error ->
-        "ログイン失敗: ${error.message ?: "unknown error"}"
+        "Sign-in failed: ${error.message ?: "unknown error"}"
     }
 }
 
@@ -877,7 +1065,7 @@ private suspend fun captureLocation(context: Context): LocationSnapshot {
         Manifest.permission.ACCESS_COARSE_LOCATION,
     ) == PackageManager.PERMISSION_GRANTED
     if (!hasFine && !hasCoarse) {
-        error("位置情報の権限が必要です")
+        error("Location permission is required")
     }
 
     val location = LocationServices.getFusedLocationProviderClient(context)
@@ -886,7 +1074,7 @@ private suspend fun captureLocation(context: Context): LocationSnapshot {
             CancellationTokenSource().token,
         )
         .await()
-        ?: error("位置を取得できませんでした")
+        ?: error("Could not get a location fix")
     val capturedAt = Instant.now().toString()
     val address = reverseGeocode(context, location.latitude, location.longitude)
     return LocationSnapshot(
@@ -915,20 +1103,26 @@ private suspend fun reverseGeocode(
     }.getOrNull()
 }
 
+// Coordinates stay on the device; only this prefecture-level text is ever shared.
 private fun LocationSnapshot.displayText(): String =
-    "${address ?: "住所不明"}\n緯度 %.6f / 経度 %.6f / 精度 %.0fm".format(
-        latitude,
-        longitude,
-        accuracyMeters,
-    )
+    "${address ?: "Address unknown"}\nAccuracy %.0f m".format(accuracyMeters)
+
+private fun callStateText(state: String): String = when (state) {
+    "accepted" -> "SOS accepted"
+    "dialing" -> "Calling your emergency contact"
+    "in_progress" -> "On the call"
+    "completed" -> "Call ended"
+    "failed" -> "The call failed"
+    else -> state
+}
 
 private fun Throwable.userMessage(): String = when (this) {
     is ApiException -> when (errorCode) {
-        "world_id_verification_required" -> "World IDで人間証明してください"
-        "contact_not_found" -> "登録した連絡先が見つかりません"
+        "world_id_verification_required" -> "Verify with World ID first"
+        "contact_not_found" -> "That emergency contact no longer exists"
         else -> errorCode
     }
-    else -> message ?: "不明なエラー"
+    else -> message ?: "unknown error"
 }
 
 private fun openWorldIdConnector(context: Context, connectorUri: String) {
@@ -942,6 +1136,12 @@ private fun openWorldIdConnector(context: Context, connectorUri: String) {
         }
         .firstOrNull { intent -> intent.resolveActivity(packageManager) != null }
     context.startActivity(worldIntent ?: Intent(Intent.ACTION_VIEW, uri))
+}
+
+private enum class AppTab(val label: String) {
+    HOME("Home"),
+    MEMBERS("Members"),
+    SETTINGS("Settings"),
 }
 
 private const val EMERGENCY_CONFIRM_WINDOW_MS = 10_000L
