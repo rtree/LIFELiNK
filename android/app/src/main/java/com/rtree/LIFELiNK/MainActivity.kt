@@ -586,6 +586,7 @@ private fun SetupScreen() {
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    ProfileSection(apiClient = apiClient, signedIn = signedInUid != null)
 
                     HorizontalDivider()
                     Text("Proof of humanity", style = MaterialTheme.typography.titleLarge)
@@ -613,6 +614,26 @@ private fun SetupScreen() {
                         },
                     ) {
                         Text("Verify with World ID")
+                    }
+                    OutlinedButton(
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = worldIdVerified,
+                        onClick = {
+                            scope.launch {
+                                runCatching {
+                                    apiClient.revokeWorldId()
+                                    // The cached ID token still carries the old claim until refreshed.
+                                    FirebaseAuth.getInstance().currentUser?.getIdToken(true)?.await()
+                                }.onSuccess {
+                                    worldIdVerified = false
+                                    worldIdStatus = "Verification removed. SOS is blocked until you verify again."
+                                }.onFailure { error ->
+                                    worldIdStatus = "Could not remove the verification: ${error.userMessage()}"
+                                }
+                            }
+                        },
+                    ) {
+                        Text("Remove World ID verification")
                     }
 
                     HorizontalDivider()
@@ -1210,7 +1231,7 @@ private suspend fun signInWithGoogle(context: android.content.Context): String {
     }
 }
 
-private suspend fun captureLocation(context: Context): LocationSnapshot {
+internal suspend fun captureLocation(context: Context): LocationSnapshot {
     val hasFine = ContextCompat.checkSelfPermission(
         context,
         Manifest.permission.ACCESS_FINE_LOCATION,
@@ -1334,6 +1355,64 @@ private fun ConferenceSosSection(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun ProfileSection(apiClient: LifeLinkApiClient, signedIn: Boolean) {
+    val scope = rememberCoroutineScope()
+    var fullName by remember { mutableStateOf("") }
+    var birthDate by remember { mutableStateOf("") }
+    var message by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(signedIn) {
+        if (!signedIn) return@LaunchedEffect
+        runCatching { apiClient.getProfile() }.onSuccess { (name, birth) ->
+            fullName = name.orEmpty()
+            birthDate = birth.orEmpty()
+        }
+    }
+    Text("Your profile", style = MaterialTheme.typography.titleMedium)
+    Text(
+        "The AI tells your contact who pressed SOS, using your name and date of birth.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    OutlinedTextField(
+        modifier = Modifier.fillMaxWidth(),
+        value = fullName,
+        onValueChange = { fullName = it },
+        label = { Text("Full name") },
+        singleLine = true,
+    )
+    OutlinedTextField(
+        modifier = Modifier.fillMaxWidth(),
+        value = birthDate,
+        onValueChange = { birthDate = it },
+        label = { Text("Date of birth (YYYY-MM-DD)") },
+        singleLine = true,
+    )
+    message?.let { Text(it) }
+    Button(
+        modifier = Modifier.fillMaxWidth(),
+        enabled = signedIn,
+        onClick = {
+            val birth = birthDate.trim()
+            if (birth.isNotEmpty() && !Regex("""\d{4}-\d{2}-\d{2}""").matches(birth)) {
+                message = "Use the format YYYY-MM-DD"
+                return@Button
+            }
+            scope.launch {
+                runCatching {
+                    apiClient.saveProfile(fullName.trim().ifEmpty { null }, birth.ifEmpty { null })
+                }.onSuccess {
+                    message = "Saved"
+                }.onFailure { error ->
+                    message = "Could not save: ${error.userMessage()}"
+                }
+            }
+        },
+    ) {
+        Text("Save profile")
     }
 }
 

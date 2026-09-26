@@ -185,6 +185,15 @@ async function verifyAndGrantHumanClaim(
 }
 
 export function registerWorldIdRoutes(app: FastifyInstance, db: Firestore): void {
+  app.post("/v1/world-id/revoke", { preHandler: authenticate }, async (request, reply) => {
+    const user = await getAuth().getUser(request.user.uid);
+    // The nullifier binding stays so this human still cannot be reused on another account.
+    const { human_verified: _removed, ...claims } = user.customClaims ?? {};
+    await getAuth().setCustomUserClaims(request.user.uid, claims);
+    app.log.info({ uid: request.user.uid }, "World ID verification revoked");
+    return reply.send({ human_verified: false });
+  });
+
   app.post("/v1/world-id/sign", { preHandler: authenticate }, async (_request, reply) => {
     const { signingKeyHex } = requireWorldIdConfig();
     const signed = signRequest({ signingKeyHex, action: config.WORLD_ID_ACTION });

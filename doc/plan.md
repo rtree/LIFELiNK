@@ -10,6 +10,15 @@
   ロック中の +Beacon 押下 → Discord 緊急 DM → 端末が AI 番号へ発信（参加コード）→ 連絡先へ発信 → 自動統合、をユーザーが実機確認。
   発信元端末は無音・画面非点灯。旧方式は `SOSV1-nope` として Settings で選べ、電話アプリ未設定時は自動で V1。
   以下の箇条書きのうち「未実装・未検証」とある記述は経緯として残す。現状は tasks の P2-12〜16（DONE）と P2-17 以降を参照。
+- **2026-09-26 21:10 人間決定**: SOSV2 で AI が参加できなくても連絡先へ直接は発信しない（Discord に SOS と居場所が届くため）。
+  Discord 招待の同意文（書き起こし・周辺音声）は製品版で扱う。60 秒打ち切りの実機確認と V1 フォールバックの確認は PX。
+- **プロフィール（凍結、P1-06a の一部を前倒し）**: `users/{uid}` に `full_name: string | null`（1〜80 字）、`birth_date: string | null`（`YYYY-MM-DD`）、
+  `profile_updated_at`。書き込みは `PUT /v1/profile`（Firebase 認証、backend のみ書く）、読み出しは `GET /v1/profile`。
+  AI の初回発話で「SOS を押したのは <氏名>、<生年月日>生まれ（<年齢>歳）」と伝える。未設定なら言わない。Discord DM 本文には載せない（書き起こし経由では流れる）。
+- **World ID の解除（P1-18、凍結）**: `POST /v1/world-id/revoke`（Firebase 認証）で custom claim `human_verified` を外す。
+  `world_id_nullifiers` の紐付けは残す（同じ人間を別アカウントに再利用させないため）。同じアカウントでの再認証は既存フローで可能。解除後は `POST /v1/emergency-events` が 403。
+- **位置の定期更新（2026-09-26）**: 見守り FGS（`BeaconMonitorService`）の種別に `location` を足し（アプリ前面から開始するので while-in-use 制約内、`ACCESS_BACKGROUND_LOCATION` は不要）、
+  画面 OFF・ロック中も 5 分ごとに `POST /v1/locations`、SOS 進行中は 20 秒ごとにイベントへ `location` 更新を送る。保存するのは従来どおり都道府県・精度・電池・揺れだけ。
 - MVP 0.1（電話・Beacon・Discord）、P1-16/17/20 は完了。8a 章の状況ストア移行は PX-14〜19 へ延期し、ハッカソンでは実装しない。
 - **周辺音はキャリア3者会議経由を先行実験する**。Galaxy＋SoftBank の手動「追加→統合→3者相互音声→ロック後もマイク到達」はユーザー確認済み。
   Twilio AI 参加、LIFELiNK の default dialer、自動発信／統合、Beacon のルート選択は未実装・未検証。

@@ -16,6 +16,8 @@ type InitialContext = {
   motionPeakG: number | null;
   initialNote: string | null;
   carrierConference: boolean;
+  ownerName: string | null;
+  ownerBirthDate: string | null;
 };
 
 type TwilioStartMessage = {
@@ -179,6 +181,7 @@ function buildInitialMessage(context: InitialContext): string {
       ? "This is the LIFELiNK emergency AI joining this call. The person who pressed SOS " +
         "is on this call, and their trusted contact may be on it too."
       : "This is an automated call from the LIFELiNK emergency app.",
+    ...describeOwner(context),
     context.address
       ? `The person is somewhere around ${context.address}.`
       : "Their area could not be determined.",
@@ -209,6 +212,19 @@ function buildInitialMessage(context: InitialContext): string {
 }
 
 export type CallTranscriptSpeaker = "contact" | "ai" | "system";
+
+function describeOwner(context: InitialContext): string[] {
+  if (!context.ownerName && !context.ownerBirthDate) return [];
+  const who = context.ownerName ?? "The person who pressed SOS";
+  if (!context.ownerBirthDate) return [`The person who pressed SOS is ${who}.`];
+  const born = new Date(`${context.ownerBirthDate}T00:00:00+09:00`);
+  const now = new Date();
+  let age = now.getFullYear() - born.getFullYear();
+  if (now < new Date(now.getFullYear(), born.getMonth(), born.getDate())) age -= 1;
+  return context.ownerName
+    ? [`The person who pressed SOS is ${who}, born on ${context.ownerBirthDate}, age ${age}.`]
+    : [`The person who pressed SOS was born on ${context.ownerBirthDate}, age ${age}.`];
+}
 
 export function registerMediaBridge(
   app: FastifyInstance,

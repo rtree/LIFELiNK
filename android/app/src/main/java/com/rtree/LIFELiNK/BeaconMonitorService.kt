@@ -1,5 +1,6 @@
 package com.rtree.LIFELiNK
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -9,6 +10,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
@@ -24,6 +26,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 // Keeps the Beacon scan owned by a visible foreground service so the OS does not freeze the app while locked.
 class BeaconMonitorService : Service() {
@@ -43,7 +46,8 @@ class BeaconMonitorService : Service() {
             NOTIFICATION_ID,
             buildNotification(),
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or
+                    if (hasLocationPermission()) ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION else 0
             } else {
                 0
             },
@@ -97,9 +101,48 @@ class BeaconMonitorService : Service() {
         screenReceiver = receiver
     }
 
+    private fun hasLocationPermission(): Boolean =
+        ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED ||
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED
+
+    // Runs while locked because the service holds the location FGS type started from the foreground app.
+    private suspend fun reportLocationLoop() {
+        if (!hasLocationPermission()) return
+        val preferences = EmergencyPreferences(this)
+        val safetyGate = EmergencySafetyGate(this)
+        val apiClient = LifeLinkApiClient()
+        while (true) {
+            var activeEventId = safetyGate.activeEventId
+            if (activeEventId != null) {
+                val state = runCatching { apiClient.getEmergencyEvent(activeEventId).state }.getOrNull()
+                if (state == "completed" || state == "failed") {
+                    safetyGate.clear(activeEventId)
+                    activeEventId = null
+                }
+            }
+            val location = withTimeoutOrNull(LOCATION_FIX_TIMEOUT_MS) {
+                runCatching { captureLocation(this@BeaconMonitorService) }.getOrNull()
+            }
+            if (location != null) {
+                preferences.location = location
+                runCatching {
+                    if (activeEventId != null) {
+                        apiClient.sendLocationUpdate(activeEventId, location)
+                    } else {
+                        apiClient.saveLocation(location)
+                    }
+                }.onFailure { AdvertisementRegistry.appendBeaconLog("Location upload failed: ${it.message}") }
+            }
+            delay(if (activeEventId != null) LOCATION_ACTIVE_INTERVAL_MS else LOCATION_IDLE_INTERVAL_MS)
+        }
+    }
+
     private fun startHeartbeat() {
         scope?.cancel()
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Default).also { heartbeatScope ->
+            heartbeatScope.launch { reportLocationLoop() }
             heartbeatScope.launch {
                 while (true) {
                     delay(HEARTBEAT_INTERVAL_MS)
@@ -154,6 +197,9 @@ class BeaconMonitorService : Service() {
         private const val NOTIFICATION_ID = 1001
         private const val ACTION_STOP = "com.rtree.LIFELiNK.STOP_MONITORING"
         private const val HEARTBEAT_INTERVAL_MS = 60_000L
+        private const val LOCATION_IDLE_INTERVAL_MS = 5 * 60_000L
+        private const val LOCATION_ACTIVE_INTERVAL_MS = 20_000L
+        private const val LOCATION_FIX_TIMEOUT_MS = 30_000L
 
         private val mutableRunning = MutableStateFlow(false)
         val running = mutableRunning.asStateFlow()

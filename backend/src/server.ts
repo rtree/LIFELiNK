@@ -74,6 +74,7 @@ registerMediaBridge(app, async (eventId, callSid) => {
   if (!event) {
     return null;
   }
+  const owner = await db.collection("users").doc(event.get("uid") as string).get();
   const location = event.get("location_snapshot") as
     | {
         address?: string | null;
@@ -99,12 +100,19 @@ registerMediaBridge(app, async (eventId, callSid) => {
     motionPeakG: location?.motion_peak_g ?? null,
     initialNote: (event.get("initial_note") as string | null) ?? null,
     carrierConference: event.get("mode") === "carrier_conference",
+    ownerName: (owner.get("full_name") as string | undefined) ?? null,
+    ownerBirthDate: (owner.get("birth_date") as string | undefined) ?? null,
   };
 }, (eventId, speaker, text) => relayCallTranscript(db, app.log, eventId, speaker, text));
 
 const contactSchema = z.object({
   name: z.string().trim().min(1).max(80),
   phone: z.string().regex(/^\+[1-9]\d{7,14}$/, "phone must use E.164 format"),
+});
+
+const profileSchema = z.object({
+  full_name: z.string().trim().min(1).max(80).nullable(),
+  birth_date: z.iso.date().nullable(),
 });
 
 const deviceSignalsSchema = {
@@ -215,6 +223,30 @@ function formatEmergencyUpdate(
 }
 
 app.get("/health", async () => ({ status: "ok" }));
+
+app.get("/v1/profile", { preHandler: authenticate }, async (request) => {
+  const user = await db.collection("users").doc(request.user.uid).get();
+  return {
+    full_name: (user.get("full_name") as string | undefined) ?? null,
+    birth_date: (user.get("birth_date") as string | undefined) ?? null,
+  };
+});
+
+app.put("/v1/profile", { preHandler: authenticate }, async (request, reply) => {
+  const parsed = profileSchema.safeParse(request.body);
+  if (!parsed.success) {
+    return reply.code(400).send({ error: "invalid_profile", details: z.flattenError(parsed.error) });
+  }
+  await db.collection("users").doc(request.user.uid).set(
+    {
+      full_name: parsed.data.full_name,
+      birth_date: parsed.data.birth_date,
+      profile_updated_at: FieldValue.serverTimestamp(),
+    },
+    { merge: true },
+  );
+  return reply.send(parsed.data);
+});
 
 app.get(
   "/v1/me",

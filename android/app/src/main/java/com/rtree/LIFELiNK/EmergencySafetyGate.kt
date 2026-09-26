@@ -14,6 +14,9 @@ class EmergencySafetyGate(context: Context) {
         Context.MODE_PRIVATE,
     )
 
+    val activeEventId: String?
+        get() = preferences.getString(ACTIVE_EVENT_ID, null)
+
     @Synchronized
     fun begin(contactId: String): EmergencyAttempt {
         val activeEventId = preferences.getString(ACTIVE_EVENT_ID, null)

@@ -192,6 +192,26 @@ class LifeLinkApiClient(
     suspend fun createDiscordInvite(): String =
         post("/v1/discord/invites", JSONObject()).getString("invite_url")
 
+    suspend fun revokeWorldId() {
+        post("/v1/world-id/revoke", JSONObject())
+    }
+
+    suspend fun getProfile(): Pair<String?, String?> {
+        val response = request("GET", "/v1/profile")
+        return response.optString("full_name").takeIf { !response.isNull("full_name") && it.isNotBlank() } to
+            response.optString("birth_date").takeIf { !response.isNull("birth_date") && it.isNotBlank() }
+    }
+
+    suspend fun saveProfile(fullName: String?, birthDate: String?) {
+        request(
+            "PUT",
+            "/v1/profile",
+            JSONObject()
+                .put("full_name", fullName ?: JSONObject.NULL)
+                .put("birth_date", birthDate ?: JSONObject.NULL),
+        )
+    }
+
     suspend fun listDiscordContacts(): List<DiscordContact> {
         val contacts = request("GET", "/v1/discord/contacts").getJSONArray("contacts")
         return (0 until contacts.length()).map { index ->

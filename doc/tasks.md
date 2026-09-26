@@ -66,7 +66,7 @@ MVP 主線（P0-01〜P0-21）は完了し `mvp-0.1` として保全済み。こ�
 | --- | --- | --- | --- | --- |
 | P1-16 | DONE | Android に緊急イベントのチャット風ライブ表示画面を実装する。`emergency_events/{id}/updates` を時系列購読し、`note`/`location`/`transcript_contact`/`transcript_ai`/`friend_comment`/`system` を種類ごとに整形して表示する（Discord チャンネル風または WhatsApp 風、uimock のテイストに近い方を採用） | P0-21（MVP 0.1 保全済み） | 2026-09-26 15:08 完了。実通話で「電話の相手の発言→AI の発言→Discord 友人の返信（`Passed to the AI on the call` 付き）→それを受けた AI の発言」が届いた順にアプリ内へ並ぶことを実機で確認（ロック解除後に目視）。実装: `firebase-firestore` 依存追加、`EmergencyFeed.kt`=表示モデルと mapper（データ源非依存、P2 で `timeline` へ差し替え可能）、`EmergencyFeedSource.kt`=Firestore listener、`EmergencyFeedSection.kt`=WhatsApp 風 UI。方針は `doc/plan.md` 6a 章。ダミーデータなし |
 | P1-17 | DONE | 英語化と B2C 向け UI 整形を段階的に進める（専用フェーズは設けず、P1-16 以降で触る画面から順に文言・配色・導線を整える） | P1-16 | 2026-09-26 15:30 完了。検証用 1 スクロール画面を **Home / Members / Settings の 3 タブ**へ再構成し、モック由来の `LifeLinkTheme`（ネイビー＋緊急レッド＋pill ボタン）を適用。Android のユーザー可視文字列は技適番号を除き全て英語（MainActivity 他 4 ファイルの常駐通知・診断ログを含む）。未実装のプロフィールはダミーを置かず "coming soon" 表示。実機で 3 タブを目視確認。方針と意図は `doc/plan.md` 4a 章「Android 画面構成と言語方針」 |
-| P1-18 | TODO | World ID の再認証・認証解除の設定画面と API を実装する（`backend/src/worldid.ts` に追加） | P2-07 完了後（`doc/plan.md` 1a 章の実行順序） | 認証切れ・失効後に設定画面から再認証でき、認証解除操作で `human_verified` claim が外れて緊急発信が再びブロックされることを実機で確認する |
+| P1-18 | IN PROGRESS | World ID の再認証・認証解除の設定画面と API を実装する（`backend/src/worldid.ts` に追加） | P2-07 完了後（`doc/plan.md` 1a 章の実行順序） | 2026-09-26 実装・デプロイ（rev `00034-xrp`）: `POST /v1/world-id/revoke` が claim を外し（nullifier の紐付けは維持）、Settings「Remove World ID verification」→ID トークン強制更新。未認証 401 を確認。残り: 実機で解除→SOS が 403 で止まる→再認証で戻る |
 | P1-19 | TODO | IDKit の `credential_types` に Passport/Selfie Check を追加する | P1-18 | Proof of Human に加えて Passport または Selfie Check でも認証が成立し、`human_verified` claim が同様に付与される |
 | P1-20 | DONE | SOS ボタンの発火条件（3 回タップ / 2 秒長押し・アーミング中の色変化）、位置情報の定期送信、精度・電池残量・揺れの取得と AI 発話/Discord DM への反映、AI と Discord の完全英語化 | P1-17 | 2026-09-26 16:0x: 実機で 1 タップ→「Keep going」と暗色化、3 タップ/長押しで発信。`POST /v1/locations` が前面中 60 秒ごと・発信中 10 秒ごとに届く。`accuracy_m`/`battery_*`/`motion_*` が Firestore に保存され、AI が「accurate to about N meters」「battery N percent」「being shaken hard」と話し、同じ情報が Discord DM にも載る。契約は `doc/plan.md` 6 章「デバイス状態の契約」。**揺れ検知は自動発信しない**（誤報を避けるため状況情報のみ） |
 | P1-01 | DONE | 通話録音/書き起こし共有の可否を決める | P0-20、同意/保持期間の判断 | 2026-09-26 決定・実装済み: 音声ファイルは録音・保存しない。通話の書き起こしのみ、同じイベントで DM 済みの同意済み Discord 受信者へ逐次中継する（`doc/plan.md` 4a 章「通話内容のリアルタイム共有」、実装 `25d9352`）。電話の相手への共有告知はデモのため入れず、製品化時に再検討する |
@@ -103,10 +103,12 @@ P2-09〜11 は独立録音の代替案として保留し、この電話実験の
 | P2-14 | DONE | 標準 Samsung dialer の手動操作で AI 単独→連絡先追加→会議を確認する（E2/E3） | P2-13、同意済み実番号 | 2026-09-26 19:15 3 者通話成立（`reference/ambient-verification.md` 0.5）。rev `00031-dfn` 後の再試験で「保留中に AI が黙る・話者を推測と言う・画面 OFF でも会話継続」をユーザー確認 |
 | P2-15 | DONE | 最低限の実ダイヤラー機能（約2画面＋α）と画面の実験 SOS を実装・実機確認する（E4） | P2-14 | 2026-09-26 20:40 実機確認（ユーザー）: role 取得、ダイヤル画面からの通常発信、画面の「Start conference SOS」で AI→join 確認→連絡先→**自動統合**（IMS は元の 2 本を新しい会議通話に置き換える。応答直後は conferenceable が空なので 1 秒ごとに再試行）、AI の振る舞い及第点。発信元端末は**マイク ON・受話口・通話音量最小・通話画面を点けない**（「ほとんど聞こえない」を確認）、終了後に音量を復元。backend rev `00033-77z`（AI に通話シーケンスと Discord 閲覧を指示）、commit `3b6fdc8`。未確認: 60 秒の呼び出し打ち切り、LIFELiNK 経由の通常着信。戻し方: Settings で電話アプリを Samsung に戻す（`cmd role get-role-holders android.app.role.DIALER`）。今後の改善: 統合タイミングを backend 経由で AI に伝えると話者推定が改善する |
 | P2-16 | DONE | Settings の Beacon SOS route 選択を追加しロック起点を確認する（E5） | P2-15 | 2026-09-26 21:00 実機確認（ユーザー）: Settings「Button SOS mode」で `SOSV1-nope` / `SOSV2-ambientMode`（**既定 V2**、人間決定）。**ロック中の Beacon 押下 → Discord 緊急 DM → 連絡先に電話 → 3 者通話**まで成立。電話アプリ未設定・`CALL_PHONE` 無しなら V1 にフォールバック。60 秒広告／75 秒途切れ規則と Safety gate は変更なし。commit `8284897` |
-| P2-17 | TODO | SOSV2 で AI が参加できないときも連絡先には必ず電話する | P2-16 | 現状は AI の join を 45 秒待って失敗すると連絡先に**発信しない**（Twilio/backend 障害で誰にもつながらない）。join 失敗・AI 通話が切れた場合は連絡先へ直接発信し、状態を画面とログに出す。二重発信しないこと |
-| P2-18 | TODO | SOSV2 の未確認経路を実機で確認する | P2-16 | (1) 連絡先が 60 秒出ないと発信をやめ AI の保留が解除される、(2) 普段の着信を LIFELiNK の画面で応答／拒否できる、(3) 画面 OFF・ロック中の着信表示、(4) 電話アプリを Samsung に戻すと Beacon が V1 にフォールバックする |
+| P2-17 | DROPPED | SOSV2 で AI が参加できないときも連絡先には必ず電話する | P2-16 | 2026-09-26 人間判断で取りやめ。AI が参加できなくても Discord に SOS と居場所が届くため |
+| P2-18 | DONE | SOSV2 の未確認経路を実機で確認する | P2-16 | 普段の着信を LIFELiNK の画面で受けられることは実機で問題なし（ユーザー）。60 秒打ち切りと V1 フォールバックの確認は PX-24 / PX-25 へ |
 | P2-19 | TODO | 統合のタイミングを AI に伝え、話者の推測を助ける | P2-16 | 統合成功時に Android→backend へ `note` 相当の更新（例: "The contact has just joined"）を送り、既存の注入キューで AI に伝える。新規スキーマは作らない |
-| P2-20 | TODO | Discord 招待の同意文に「通話の書き起こしが届く」「SOSV2 では本人周辺の音声も通話に乗る」を明記する | なし | README の既知の同意ギャップを解消。既存の同意済み連絡先の扱い（再同意の要否）も決める |
+| P2-20 | DEFERRED | Discord 招待の同意文に「通話の書き起こしが届く」「SOSV2 では本人周辺の音声も通話に乗る」を明記する | なし | 2026-09-26 人間判断: 製品版で扱う。README の同意ギャップの記述は残す |
+| P2-21 | IN PROGRESS | 氏名と生年月日を設定でき、AI が初回発話で伝える | なし | 2026-09-26 実装・デプロイ（backend rev `00034-xrp`）: `GET/PUT /v1/profile`、`users/{uid}.full_name/birth_date`、Settings「Your profile」。残り: 実機で保存→通話で AI が名前と年齢を言うことを確認 |
+| P2-22 | IN PROGRESS | 画面 OFF・ロック中も位置を定期更新する | なし | 2026-09-26 実装: 見守り FGS に `location` 種別＋`FOREGROUND_SERVICE_LOCATION`。5 分ごとに `POST /v1/locations`、SOS 進行中は 20 秒ごとにイベントへ location 更新。残り: 見守りを開始し直して（位置権限がある状態で）ロック中に Firestore の `users/{uid}/locations` が増えることを確認 |
 
 ## P3（欠番）
 
@@ -130,6 +132,8 @@ P2-09〜11 は独立録音の代替案として保留し、この電話実験の
 | PX-21 | P3-02 | TODO | Beacon 見守りの長時間ロック（15 分〜2 時間）・APK 更新/再起動後の復帰・通知権限拒否時の挙動を測る | 時間が余った場合のみ | heartbeat 欠落・受信遅延・見落としの観測値を `doc/plan.md` 6b 章へ記録 |
 | PX-22 | P3-03 | TODO | 画面 OFF 直後の受信空白（38 秒の実測あり）を定量化し、送信時間 10 秒を維持するか判断する | 時間が余った場合のみ | 空白の発生率・長さ・条件と対策の効果が `doc/plan.md` 6b 章に記録される |
 | PX-23 | P3-04 | TODO | ボタンの死活表示（最終受信時刻、未受信警告、電池低下警告、初期設定の確認項目） | PX-22（警告しきい値の根拠） | IDLE 化・電池抜き・範囲外で警告が出て、復帰で消えることを実機確認 |
+| PX-24 | P2-18 | TODO | SOSV2 で連絡先が 60 秒出ないとき、発信をやめ AI の保留が解除されることを実機確認 | 時間が余った場合のみ | 実装済み・未確認。留守番電話が応答すると統合され得る |
+| PX-25 | P2-18 | TODO | 電話アプリを Samsung に戻すと Beacon が SOSV1 にフォールバックすることを実機確認 | 時間が余った場合のみ | 実装済み・未確認。デモでは手動で切り替える |
 | PX-01 | P1-02 | TODO | LIFELiNK アプリ同士の友人リンクが Discord で代替できないか再評価し、必要な場合だけ `friend_links`・相互承認 API を設計/実装する | 将来の再判断 | 採用すると決めた場合に限り、本人確認を伴う相互リンクが成立。P1・P2 を待たせない |
 | PX-02 | P1-03 | TODO | アプリ内友人リンクを採用する場合のみ `emergencySessions.participant_uids` に承認済み Firebase UID をスナップショットする | PX-01 を実装すると決めた場合 | 後から友人になった uid に過去イベントを公開せず、Discord ID を UID と混同しない |
 | PX-03 | P1-04 | TODO | アプリ内友人のコメントを `timeline` に追加する（Discord モーダル返信の保存は P0-19 で実装済み） | PX-02 と P2-02 | アプリ内友人がコメントできる |
@@ -153,7 +157,7 @@ P2-09〜11 は独立録音の代替案として保留し、この電話実験の
 1. ~~**P1-16**: アプリ内チャット風ライブ表示~~ **完了（2026-09-26 15:08、実通話で確認済み）**。
 2. ~~**P1-17**: 英語化・B2C 向け UI 整形~~ **完了（2026-09-26 15:30、3 タブ化・テーマ適用・全文英語化）**。
 3. ~~**P2-12 → P2-16**: キャリア3者会議（SOSV2-ambientMode）~~ **完了（2026-09-26 21:00、ロック中の Beacon から3者通話まで実機確認、既定 V2）**。
-4. **次の候補**（上から推奨順）: P2-17（AI 不参加でも連絡先に電話）→ P1-18（World ID 認証の解除・再認証）→ P2-20（Discord 同意文）→ P2-18（未確認経路）→ P2-19（統合を AI に通知）。
+4. **次の候補**: P1-18（World ID 解除・再認証、実機確認待ち）、P2-21（氏名・生年月日）、P2-22（ロック中の位置更新）。P2-19（統合を AI に通知）は任意。P2-17 は取りやめ、P2-20 は製品版へ。
 5. 並行して、実端末で縦断フローを何度も回して堅牢化する。壊れたものをその場で直し、見つかった問題をタスクとして本ファイルへ追加する。
 6. P1-19（Passport/Selfie）と PX（状況ストア、異常系の網羅、アプリ内友人リンク、GATT）は時間が余った場合のみ。
 
