@@ -57,6 +57,8 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -365,7 +367,13 @@ private fun SetupScreen() {
                         .padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 10.dp),
                 ) {
                     Text(
-                        "LIFELiNK",
+                        buildAnnotatedString {
+                            append("LIFEL")
+                            pushStyle(SpanStyle(color = MaterialTheme.colorScheme.error))
+                            append("i")
+                            pop()
+                            append("NK")
+                        },
                         style = MaterialTheme.typography.titleLarge,
                         color = MaterialTheme.colorScheme.primary,
                     )
