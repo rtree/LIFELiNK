@@ -1,6 +1,6 @@
 # ＋Beacon ボタン（PB-BTN-01）実機検証記録（2026-09-26）
 
-LIFELiNK の物理ボタン経路（iBeacon）を Samsung Galaxy（SM-S942Z / Android 16 / API 36、USB 充電中）で検証した結果の要約。詳細な経緯と決定は `doc/plan.md` 6b 章、タスクは `doc/tasks.md`（P0-14a / P0-15 / P3-02〜P3-04）を正とする。
+LIFELiNK の物理ボタン経路（iBeacon）を Samsung Galaxy（SM-S942Z / Android 16 / API 36、USB 充電中）で検証した結果の要約。詳細な経緯と決定は `doc/ja-jp/plan.md` 6b 章、タスクは `doc/ja-jp/tasks.md`（P0-14a / P0-15 / P3-02〜P3-04）を正とする。
 
 ## 1. ボタン側の仕様と設定
 
