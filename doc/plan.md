@@ -359,6 +359,8 @@ Braveridge「＋Beacon ボタン」製品仕様書 Version 1.0.0 により、製
 ```
 
 - Beacon 広告にはイベントごとの ACK がないため、同じ広告の複数受信は一回の押下として重複排除する。
+- Android の Beacon 経路はドライラン（発信しない）を既定値とし、画面のスイッチで明示的に OFF にした時だけ実発信する。ドライラン中も重複排除までは本番と同じ処理を通し、「本番なら発信候補」になったバーストを診断ログへ記録する。
+- ボタン操作と UUID/Major/Minor の対応を確定するため、Android は BLE アドレスごとの iBeacon 識別値の変化を「Beacon状態遷移ログ」へ時刻付きで記録する（プロセス内メモリのみ、最大100件、backend へ送らない）。
 - 画面 ON で確実に動く退避経路として保持し、ロック中の配送保証には使わない（ロック中の確実な配送は GATT 側の役割）。
 - 使用箇所は `core` の iBeacon parser / `EventGate` と、`bluetooth` の `BeaconReceiver` / Filter / PendingIntent とする。
 

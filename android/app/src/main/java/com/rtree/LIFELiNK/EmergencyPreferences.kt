@@ -49,6 +49,12 @@ class EmergencyPreferences(context: Context) {
             preferences.edit().putString(WORLD_ID_FLOW_ID, value).apply()
         }
 
+    var beaconDryRun: Boolean
+        get() = preferences.getBoolean(BEACON_DRY_RUN, true)
+        set(value) {
+            preferences.edit().putBoolean(BEACON_DRY_RUN, value).apply()
+        }
+
     var linkedTriggerDevice: LinkedTriggerDevice?
         get() = preferences.getString(LINKED_TRIGGER_DEVICE, null)?.let { encoded ->
             runCatching {
@@ -106,5 +112,6 @@ class EmergencyPreferences(context: Context) {
         const val LOCATION = "location"
         const val WORLD_ID_FLOW_ID = "world_id_flow_id"
         const val LINKED_TRIGGER_DEVICE = "linked_trigger_device"
+        const val BEACON_DRY_RUN = "beacon_dry_run"
     }
 }

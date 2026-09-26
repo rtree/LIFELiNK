@@ -40,11 +40,33 @@ private data class IBeaconIdentity(
     val batteryLow: Boolean,
 )
 
+data class BeaconLogEntry(
+    val atMillis: Long,
+    val text: String,
+)
+
 object AdvertisementRegistry {
     private const val APPLE_COMPANY_ID = 0x004c
+    private const val MAX_LOG_ENTRIES = 100
 
     private val mutableObservations = MutableStateFlow<List<AdvertisementObservation>>(emptyList())
     val observations = mutableObservations.asStateFlow()
+
+    private val mutableBeaconLog = MutableStateFlow<List<BeaconLogEntry>>(emptyList())
+    val beaconLog = mutableBeaconLog.asStateFlow()
+    private val lastIBeaconIdentityByAddress = mutableMapOf<String, String>()
+
+    @Synchronized
+    fun appendBeaconLog(text: String, atMillis: Long = System.currentTimeMillis()) {
+        mutableBeaconLog.value = (listOf(BeaconLogEntry(atMillis, text)) + mutableBeaconLog.value)
+            .take(MAX_LOG_ENTRIES)
+    }
+
+    @Synchronized
+    fun clearBeaconLog() {
+        mutableBeaconLog.value = emptyList()
+        lastIBeaconIdentityByAddress.clear()
+    }
 
     @Synchronized
     fun observe(result: ScanResult): AdvertisementObservation {
@@ -52,12 +74,28 @@ object AdvertisementRegistry {
         val parsed = parse(result, now)
         val previous = mutableObservations.value.firstOrNull { it.key == parsed.key }
         val updated = parsed.copy(seenCount = (previous?.seenCount ?: 0) + 1)
+        recordIBeaconTransition(updated, now)
         mutableObservations.value = (mutableObservations.value.filterNot { it.key == updated.key } + updated)
             .sortedWith(
                 compareBy<AdvertisementObservation, String>(String.CASE_INSENSITIVE_ORDER) { it.title }
                     .thenBy { it.key },
             )
         return updated
+    }
+
+    // Records identity changes per physical address so button operations can be mapped to UUID/Major/Minor states.
+    private fun recordIBeaconTransition(observation: AdvertisementObservation, now: Long) {
+        if (observation.kind != AdvertisementKind.IBEACON) return
+        val address = observation.deviceAddress ?: return
+        val identity = "${observation.beaconUuid} / ${observation.beaconMajor} / ${observation.beaconMinor}" +
+            if (observation.beaconBatteryLow == true) " (電池低下)" else ""
+        val previous = lastIBeaconIdentityByAddress.put(address, identity)
+        if (previous == identity) return
+        val label = address.takeLast(5).replace(":", "")
+        appendBeaconLog(
+            if (previous == null) "[$label] 初回: $identity" else "[$label] 変化: $previous → $identity",
+            now,
+        )
     }
 
     private fun parse(result: ScanResult, now: Long): AdvertisementObservation {

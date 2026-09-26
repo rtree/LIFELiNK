@@ -253,6 +253,11 @@ class BeaconReceiver : BroadcastReceiver() {
             return
         }
         val preferences = EmergencyPreferences(context)
+        if (preferences.beaconDryRun) {
+            Log.i(LOG_TAG, "Dry-run: linked Beacon burst accepted, emergency call skipped")
+            AdvertisementRegistry.appendBeaconLog("ドライラン: リンク済みBeaconの新規バースト（本番なら発信候補、発信せず）")
+            return
+        }
         val contactId = preferences.contactId
         if (contactId == null) {
             Log.w(LOG_TAG, "Ignored Beacon because no emergency contact is registered")

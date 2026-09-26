@@ -29,6 +29,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -110,6 +111,8 @@ private fun SetupScreen() {
     var beaconDiagnosticText by remember { mutableStateOf("") }
     var linkedTriggerDevice by remember { mutableStateOf(emergencyPreferences.linkedTriggerDevice) }
     val observedAdvertisements by AdvertisementRegistry.observations.collectAsStateWithLifecycle()
+    val beaconLog by AdvertisementRegistry.beaconLog.collectAsStateWithLifecycle()
+    var beaconDryRun by remember { mutableStateOf(emergencyPreferences.beaconDryRun) }
 
     LaunchedEffect(initialUser?.uid) {
         val claims = initialUser?.getIdToken(false)?.await()?.claims.orEmpty()
@@ -406,6 +409,22 @@ private fun SetupScreen() {
             Text("通話中メモを送信")
         }
         Text(beaconText)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                if (beaconDryRun) "Beaconドライラン: ON（発信しません）" else "Beaconドライラン: OFF（実発信します）",
+                color = if (beaconDryRun) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error,
+            )
+            Switch(
+                checked = beaconDryRun,
+                onCheckedChange = { checked ->
+                    emergencyPreferences.beaconDryRun = checked
+                    beaconDryRun = checked
+                },
+            )
+        }
         Button(
             modifier = Modifier.fillMaxWidth(),
             enabled = contactId != null,
@@ -448,6 +467,10 @@ private fun SetupScreen() {
                     beaconText = "既定Beaconを監視中"
                 }
             },
+        )
+        BeaconLogSection(
+            entries = beaconLog,
+            onClear = AdvertisementRegistry::clearBeaconLog,
         )
         if (BuildConfig.DEBUG) {
             Text(beaconDiagnosticText)
@@ -514,6 +537,30 @@ private fun AdvertisementLinkSection(
                 onLink = { onLink(observation) },
             )
         }
+    }
+}
+
+@Composable
+private fun BeaconLogSection(
+    entries: List<BeaconLogEntry>,
+    onClear: () -> Unit,
+) {
+    HorizontalDivider()
+    Text("Beacon状態遷移ログ", style = MaterialTheme.typography.titleLarge)
+    Text(
+        "ボタン操作ごとにUUID/Major/Minorの変化を記録します（新しい順、最大100件）",
+        style = MaterialTheme.typography.bodySmall,
+    )
+    Button(onClick = onClear, modifier = Modifier.fillMaxWidth()) {
+        Text("ログを消去")
+    }
+    entries.forEach { entry ->
+        val time = remember(entry.atMillis) {
+            LAST_SEEN_TIME_FORMATTER.format(
+                Instant.ofEpochMilli(entry.atMillis).atZone(ZoneId.systemDefault()),
+            )
+        }
+        Text("$time ${entry.text}", style = MaterialTheme.typography.bodySmall)
     }
 }
 
