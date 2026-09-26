@@ -1,13 +1,107 @@
 # 周辺音の収集: 可否調査と実機検証（ambient）
 
-最終更新: 2026-09-26 / 状態: **調査完了・実装ゼロ・実機未検証**
+最終更新: 2026-09-26 / 状態: **調査完了・マイク権限の宣言のみ実装・録音は未実装・実機未検証**
 
 目的は「周囲の音を短いテキスト観測に変えて、通話中の AI と Discord の友人に渡す」こと。
-本ファイルは「そもそも今の状態で録れるのか」「何を実機で確かめるべきか」を集約する生きた文書。
+本ファイルは**周辺音の作業を別セッションで再開するための単独の入口**であり、
+「そもそも今の状態で録れるのか」「何を実機で確かめるべきか」を集約する生きた文書。
 検証するたびに 5 章へ観測値を追記すること。
 
 不変条件（先に固定）: **生音声は永続化しない。** 解析のための一時送信は許容するが、
 保存するのは派生テキストだけ。`updates`・ログ・一時ファイルのどこにも音声バイトを残さない。
+
+---
+
+## 0. このセッションを再開する人へ
+
+**読む順序**: `reference/handover.md`（プロジェクト全体の不変条件・環境・落とし穴）→ 本ファイル → 必要なら
+`doc/tasks.md` の P2 節。**`handover.md` を読まずに環境を触らないこと。**
+
+### 現在地（2026-09-26 時点）
+
+| 項目 | 状態 |
+| --- | --- |
+| commit | `dd262a0`（main、push 済み） |
+| Cloud Run | `lifelink-backend-00029-pfg`、`maxScale=1` |
+| 実機 | Samsung SM-S942Z / Android 16 / serial `RFGL41GKP0Z`（SSH alias `beacon-host` 経由） |
+| マニフェスト | `RECORD_AUDIO` と `FOREGROUND_SERVICE_MICROPHONE` を宣言済み |
+| マイク権限の実行時許可 | **まだ `granted=false`**。Settings の "Allow microphone" を人間が押す必要がある |
+| 録音コード | **ゼロ**。`AudioRecord` も FGS も未実装 |
+| backend の取り込み口 | **無い**。音声チャンクを受ける API も `type: "ambient"` の書き込みも未実装 |
+
+つまり **P2-08 まで完了、P2-09 以降は手つかず**。
+
+### 次の一手（この順で）
+
+1. **人間に "Allow microphone" を押してもらう**（Settings タブ最下部の Listening セクション）。
+   押されるまで録音の実機検証は一切できない。確認コマンドは下の 0.2。
+2. `doc/plan.md` に `updates.type: "ambient"` のスキーマを**先に**書く（コードより先に文書、が本リポジトリの規則）。
+   案は 9 章にあるが、まだ凍結していない。
+3. `microphone` 種別の FGS を実装し、**5 章のチェックリストを実機で埋める**。
+   ここが本当の山場で、「ロック中に録れるか」が未検証のまま設計を積むと後で全部崩れる。
+4. 録れることを確認してから、初めて backend の取り込み（P2-10）へ進む。
+
+**順番を飛ばさないこと。** 3 を確かめる前に 4 を作ると、動かない理由が「録れていない」のか
+「送れていない」のか切り分けられなくなる。
+
+### 0.1 環境コマンド（`handover.md` 3 章の抜粋）
+
+```sh
+# Android ビルド（JDK 21。17 ではない）
+cd /Users/araki/operations/LIFELiNK/android
+export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
+export ANDROID_HOME="$HOME/Library/Android/sdk"
+./gradlew assembleDebug
+
+# 実機へ配布
+scp app/build/outputs/apk/debug/app-debug.apk beacon-host:/tmp/lifelink-debug.apk
+ssh beacon-host '"$HOME/Library/Android/sdk/platform-tools/adb" -s RFGL41GKP0Z install -r /tmp/lifelink-debug.apk'
+
+# backend デプロイ（既存 env/secret は保持される。--project を必ず付ける）
+gcloud run deploy lifelink-backend --source backend --region=asia-northeast1 \
+  --project=ethglobaltokyo2026lifelink --quiet
+```
+
+### 0.2 確認コマンド
+
+```sh
+ADB='"$HOME/Library/Android/sdk/platform-tools/adb" -s RFGL41GKP0Z'
+
+# マイク権限が許可されたか
+ssh beacon-host "$ADB shell dumpsys package com.rtree.LIFELiNK | grep 'RECORD_AUDIO: granted'"
+
+# 今マイクを掴んでいるアプリ（録音中かを OS 側から確認する）
+ssh beacon-host "$ADB shell dumpsys media.audio_flinger | grep -i -A5 'Input thread'"
+ssh beacon-host "$ADB shell dumpsys audio | grep -i -A10 'recording'"
+
+# FGS が生きているか・種別は何か
+ssh beacon-host "$ADB shell dumpsys activity services com.rtree.LIFELiNK | grep -iE 'ServiceRecord|foreground|type'"
+
+# 画面 OFF / ロックの制御（検証用）
+ssh beacon-host "$ADB shell input keyevent KEYCODE_SLEEP"   # 画面 OFF
+ssh beacon-host "$ADB shell input keyevent KEYCODE_WAKEUP"  # 画面 ON
+ssh beacon-host "$ADB shell dumpsys window | grep -m2 -E 'mCurrentFocus|mDreamingLockscreen'"
+
+# アプリのログ（既存の Beacon ログと同じ仕組みに相乗りするのが楽）
+ssh beacon-host "$ADB logcat -s LIFELiNK.BeaconLog"
+```
+
+**zsh の罠**: `UID` は読み取り専用変数なので `UID=$(...)` は失敗する。`OWNER` 等に変えること。
+`echo ===` も展開エラーになるのでクォートする。
+
+### 0.3 触ってよい / 触ってはいけない
+
+触ってよい:
+- 新規ファイル（`AmbientAudioService.kt` 等）
+- `AndroidManifest.xml`（サービス追加）
+- `MainActivity.kt` の Settings タブ内 Listening セクション
+- `backend/src/server.ts` への新エンドポイント追加
+
+**触ってはいけない**:
+- `backend/src/voice.ts` の Realtime セッション周り。**既存の通話セッションに周辺音を混ぜない**（6 章）。
+  rev `00029-pfg` で直した `response.create` 競合を再燃させる。
+- Cloud Run の `maxScale=1`。通話中セッションと Discord キューがインスタンス内メモリのため。
+- `emergency_events`/`updates` の既存フィールド名。追加は可、変更・削除は不可。
 
 ---
 
@@ -120,6 +214,12 @@ Samsung SM-S942Z / Android 16 / serial `RFGL41GKP0Z`。手順は `reference/hand
 - [ ] 録音中のバッテリー消費（%/時）
 
 計測の勘所: 「録れているか」と「送れているか」を分けて記録すること。混同すると原因を取り違える。
+Doze はマイクを止めないがネットワークは止めるので、この 2 つは実際に別々に壊れる。
+使うコマンドは 0.2 にまとめてある。観測値は日時・画面状態・ロック状態・充電の有無とセットで下に追記すること。
+
+### 観測ログ（ここに追記していく）
+
+まだ 1 件も計測していない。
 
 ---
 
@@ -167,7 +267,57 @@ SoundTrigger 系はユーザーが選択した `VoiceInteractionService` 専用�
 
 ---
 
-## 8. 出典
+## 8. 実装の設計案（**未凍結**）と未決事項
+
+### 8.1 スキーマ案（`doc/plan.md` へ書いてから実装すること）
+
+`emergency_events/{id}/updates/{update_id}` に `type: "ambient"` を足す案。6a 章の既存スキーマに乗る形:
+
+```yaml
+type: ambient
+author_type: system
+author_uid: null
+author_name: "Ambient"
+text: string            # 例 "Two people are arguing loudly." / "Glass breaking (0.82)"
+payload:
+  provider: string      # "openai:gpt-4o-mini-transcribe" | "yamnet"
+  captured_at: string   # ISO8601、チャンクの開始時刻
+  confidence: number | null
+created_at: timestamp
+delivered_to_ai_at: timestamp | null
+```
+
+Android 側のライブフィードは `EmergencyFeed.kt` の mapper に `"ambient" -> ...` を 1 行足すだけで出せる。
+`EmergencyFeedKind` に `AMBIENT` を追加し、`SYSTEM` と同じ中央寄せか、専用の淡色バブルにする。
+
+### 8.2 AI への注入は必ず間引く
+
+`injectEmergencyUpdate` をそのまま毎チャンク呼ぶと、**通話が実況中継になって肝心のやりとりが埋まる**。
+位置更新だけでも発信中は 10 秒ごとに入っている。最低限:
+
+- 直前の観測とテキストの意味が変わったときだけ注入する
+- 最短間隔を設ける（30 秒など）
+- 「悲鳴」「ガラス」等の重大ラベルだけは即時注入の例外にする
+
+この方針自体もまだ人間に確認していない。実装前に合意を取ること。
+
+### 8.3 未決事項（人間に聞く / 決める）
+
+- **同意の取り方と文言**。「緊急時にマイクで周囲を聞き、テキスト化して連絡先と友人に共有する」ことへの
+  明示同意をどの画面でどう取るか。Play の目立つ開示（prominent disclosure）要件に関わる。
+- **「保存しない」と「送らない」は別の約束**（7 章）。チャンク送信方式を採るなら生音声は一時的に
+  OpenAI へ渡る。この差を `doc/plan.md` 12 章へ明記し、同意文言にも反映するか。
+- **録音を開始する条件**。SOS 発信中だけか、見守り中も常時か。常時なら電池とプライバシーの影響が桁違いになる。
+- **録音を止める条件**。通話終了で止めるか、一定時間で必ず止めるか。止め忘れは最悪の事故になる。
+- `AudioRecord` を `setPrivacySensitive(true)` にするか。true にすると他アプリ（アシスタント含む）に
+  横取りされないが、こちらも他アプリと同時キャプチャできなくなる。緊急用途では true が妥当か。
+- transcription セッションで `audio/pcmu` が通るか（通れば端末→backend も 8 kHz μ-law で統一でき帯域 1/4）。
+  ただし 6 章の推奨は HTTP チャンクなので、当面は不要。
+- OpenAI 側の音声データ保持ポリシーを確認する。
+
+---
+
+## 9. 出典
 
 - Foreground service types / 背景起動制限 / while-in-use 除外:
   <https://developer.android.com/develop/background-work/services/fgs/service-types>,
