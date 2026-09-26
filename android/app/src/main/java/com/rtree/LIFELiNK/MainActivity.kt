@@ -15,26 +15,34 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.credentials.CredentialManager
@@ -48,12 +56,15 @@ import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.GoogleAuthProvider
 import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -75,8 +86,15 @@ private fun SetupScreen() {
     val apiClient = remember { LifeLinkApiClient() }
     val safetyGate = remember { EmergencySafetyGate(context) }
     val emergencyPreferences = remember { EmergencyPreferences(context) }
-    var status by remember { mutableStateOf("Googleでログインしてください") }
+    val initialUser = FirebaseAuth.getInstance().currentUser
+    var status by remember {
+        mutableStateOf(
+            initialUser?.let { "ログイン済み: ${it.email ?: it.uid}" }
+                ?: "Googleでログインしてください",
+        )
+    }
     var worldIdStatus by remember { mutableStateOf("World ID人間証明は未完了です") }
+    var pendingWorldIdFlowId by remember { mutableStateOf(emergencyPreferences.worldIdFlowId) }
     var locationText by remember { mutableStateOf("位置情報はまだ保存されていません") }
     var currentLocation by remember { mutableStateOf(emergencyPreferences.location) }
     var contactName by remember { mutableStateOf("") }
@@ -93,6 +111,54 @@ private fun SetupScreen() {
     var emergencyText by remember { mutableStateOf("緊急発信は待機中です") }
     var activeEmergencyEventId by remember { mutableStateOf<String?>(null) }
     var beaconText by remember { mutableStateOf("Beacon監視は停止中です") }
+    var linkedTriggerDevice by remember { mutableStateOf(emergencyPreferences.linkedTriggerDevice) }
+    val observedAdvertisements by AdvertisementRegistry.observations.collectAsStateWithLifecycle()
+    val beaconLog by AdvertisementRegistry.beaconLog.collectAsStateWithLifecycle()
+    var beaconDryRun by remember { mutableStateOf(emergencyPreferences.beaconDryRun) }
+
+    LaunchedEffect(initialUser?.uid) {
+        val claims = initialUser?.getIdToken(false)?.await()?.claims.orEmpty()
+        if (claims["human_verified"] == true) {
+            worldIdStatus = "World ID人間証明済み"
+        }
+    }
+
+    LaunchedEffect(pendingWorldIdFlowId) {
+        val flowId = pendingWorldIdFlowId ?: return@LaunchedEffect
+        while (true) {
+            val flowStatus = runCatching {
+                apiClient.getWorldIdFlowStatus(flowId)
+            }.getOrElse { error ->
+                if (error is ApiException && error.statusCode in setOf(404, 410)) {
+                    emergencyPreferences.worldIdFlowId = null
+                    pendingWorldIdFlowId = null
+                    worldIdStatus = "World ID証明の有効期限が切れました。もう一度お試しください"
+                    return@LaunchedEffect
+                }
+                worldIdStatus = "通信が一時的に不安定です。自動で再試行しています"
+                delay(WORLD_ID_STATUS_POLL_INTERVAL_MS)
+                continue
+            }
+            when (flowStatus.state) {
+                "verified" -> {
+                    FirebaseAuth.getInstance().currentUser?.getIdToken(true)?.await()
+                    emergencyPreferences.worldIdFlowId = null
+                    pendingWorldIdFlowId = null
+                    worldIdStatus = "World ID人間証明済み"
+                    return@LaunchedEffect
+                }
+                "failed" -> {
+                    emergencyPreferences.worldIdFlowId = null
+                    pendingWorldIdFlowId = null
+                    worldIdStatus = "World ID証明失敗: ${flowStatus.error ?: "unknown"}"
+                    return@LaunchedEffect
+                }
+                "waiting_for_connection" -> worldIdStatus = "World Appの接続を待っています"
+                "awaiting_confirmation" -> worldIdStatus = "World Appで確認中です"
+            }
+            delay(WORLD_ID_STATUS_POLL_INTERVAL_MS)
+        }
+    }
 
     val requestBluetoothPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
@@ -174,28 +240,10 @@ private fun SetupScreen() {
                 scope.launch {
                     runCatching {
                         val flow = apiClient.startWorldIdFlow()
-                        context.startActivity(
-                            Intent(Intent.ACTION_VIEW, Uri.parse(flow.connectorUri)),
-                        )
+                        emergencyPreferences.worldIdFlowId = flow.flowId
+                        pendingWorldIdFlowId = flow.flowId
+                        openWorldIdConnector(context, flow.connectorUri)
                         worldIdStatus = "World Appで人間証明を完了してください"
-                        while (true) {
-                            delay(WORLD_ID_STATUS_POLL_INTERVAL_MS)
-                            val flowStatus = apiClient.getWorldIdFlowStatus(flow.flowId)
-                            when (flowStatus.state) {
-                                "verified" -> {
-                                    FirebaseAuth.getInstance().currentUser
-                                        ?.getIdToken(true)
-                                        ?.await()
-                                    worldIdStatus = "World ID人間証明済み"
-                                    break
-                                }
-                                "failed" -> error(flowStatus.error ?: "World ID verification failed")
-                                "waiting_for_connection" ->
-                                    worldIdStatus = "World Appの接続を待っています"
-                                "awaiting_confirmation" ->
-                                    worldIdStatus = "World Appで確認中です"
-                            }
-                        }
                     }.onFailure { error ->
                         worldIdStatus = "World ID証明失敗: ${error.userMessage()}"
                     }
@@ -309,8 +357,13 @@ private fun SetupScreen() {
                             initialNote = initialNote,
                         )
                     }.onSuccess { event ->
-                        activeEmergencyEventId = event.eventId
                         emergencyText = "発信状態: ${event.state}"
+                        if (event.state in TERMINAL_EVENT_STATES) {
+                            safetyGate.clear(event.eventId)
+                            activeEmergencyEventId = null
+                            return@onSuccess
+                        }
+                        activeEmergencyEventId = event.eventId
                         while (event.state !in TERMINAL_EVENT_STATES) {
                             delay(EVENT_STATUS_POLL_INTERVAL_MS)
                             val latest = runCatching {
@@ -358,6 +411,22 @@ private fun SetupScreen() {
             Text("通話中メモを送信")
         }
         Text(beaconText)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                if (beaconDryRun) "Beaconドライラン: ON（発信しません）" else "Beaconドライラン: OFF（実発信します）",
+                color = if (beaconDryRun) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error,
+            )
+            Switch(
+                checked = beaconDryRun,
+                onCheckedChange = { checked ->
+                    emergencyPreferences.beaconDryRun = checked
+                    beaconDryRun = checked
+                },
+            )
+        }
         Button(
             modifier = Modifier.fillMaxWidth(),
             enabled = contactId != null,
@@ -379,8 +448,178 @@ private fun SetupScreen() {
         ) {
             Text("Beacon監視を開始")
         }
+        AdvertisementLinkSection(
+            observations = observedAdvertisements,
+            linkedDevice = linkedTriggerDevice,
+            onLink = { observation ->
+                emergencyPreferences.linkTrigger(observation)
+                linkedTriggerDevice = emergencyPreferences.linkedTriggerDevice
+                if (BeaconTriggerManager.hasPermission(context)) {
+                    BeaconTriggerManager.stop(context)
+                    BeaconTriggerManager.start(context)
+                    beaconText = "${observation.suggestedTransport?.label}リンク済み・監視中"
+                }
+            },
+            onUnlink = {
+                emergencyPreferences.linkedTriggerDevice = null
+                linkedTriggerDevice = null
+                if (BeaconTriggerManager.hasPermission(context)) {
+                    BeaconTriggerManager.stop(context)
+                    BeaconTriggerManager.start(context)
+                    beaconText = "リンク解除済み（観測のみ、発信トリガーなし）"
+                }
+            },
+        )
+        BeaconLogSection(
+            entries = beaconLog,
+            onClear = AdvertisementRegistry::clearBeaconLog,
+        )
         Spacer(Modifier.height(12.dp))
         Text("Backend: ${BuildConfig.BACKEND_URL}", style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+@Composable
+private fun AdvertisementLinkSection(
+    observations: List<AdvertisementObservation>,
+    linkedDevice: LinkedTriggerDevice?,
+    onLink: (AdvertisementObservation) -> Unit,
+    onUnlink: () -> Unit,
+) {
+    HorizontalDivider()
+    Text("物理ボタンをリンク", style = MaterialTheme.typography.titleLarge)
+    Text(
+        linkedDevice?.let { device ->
+            "リンク済み: ${device.transport.label} / ${device.title}\n" +
+                device.beaconSlots.joinToString("\n") { "・${it.label}" }
+        } ?: "未リンク: 発信トリガーは無効です。自分のボタンをリンクしてください",
+    )
+    Text(
+        "リンク手順: ボタン1とボタン2を一度ずつ短押しし、変化したカードの観測スロットが増えたらリンクします。" +
+            "広告パケット数は押下回数ではありません（1回の押下で約60秒間、1秒ごとに送信）。",
+        style = MaterialTheme.typography.bodySmall,
+    )
+    if (linkedDevice != null) {
+        Button(onClick = onUnlink, modifier = Modifier.fillMaxWidth()) {
+            Text("リンクを解除")
+        }
+    }
+
+    AdvertisementKind.entries.forEach { kind ->
+        val entries = observations
+            .filter { it.kind == kind }
+            .sortedWith(
+                compareBy<AdvertisementObservation, String>(String.CASE_INSENSITIVE_ORDER) { it.title }
+                    .thenBy { it.key },
+            )
+        if (entries.isEmpty()) return@forEach
+        Text(kind.label, style = MaterialTheme.typography.titleMedium)
+        entries.forEach { observation ->
+            AdvertisementObservationCard(
+                observation = observation,
+                linkedDevice = linkedDevice?.takeIf { it.key == observation.key },
+                onLink = { onLink(observation) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun BeaconLogSection(
+    entries: List<BeaconLogEntry>,
+    onClear: () -> Unit,
+) {
+    HorizontalDivider()
+    Text("Beaconログ", style = MaterialTheme.typography.titleLarge)
+    Text(
+        "状態変化・長押し受理・遅延・API所要時間を記録します（新しい順、最大300件。長押しで選択コピー可、同じ内容をlogcatタグ LIFELiNK.BeaconLog にも出力）",
+        style = MaterialTheme.typography.bodySmall,
+    )
+    val clipboard = LocalClipboardManager.current
+    val logText = entries.joinToString("\n") { "${formatLogTime(it.atMillis)} ${it.text}" }
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Button(onClick = { clipboard.setText(AnnotatedString(logText)) }, modifier = Modifier.weight(1f)) {
+            Text("ログをコピー")
+        }
+        Button(onClick = onClear, modifier = Modifier.weight(1f)) {
+            Text("ログを消去")
+        }
+    }
+    SelectionContainer {
+        Text(logText, style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+@Composable
+private fun AdvertisementObservationCard(
+    observation: AdvertisementObservation,
+    linkedDevice: LinkedTriggerDevice?,
+    onLink: () -> Unit,
+) {
+    val lastSeenTime = remember(observation.lastSeenAtMillis) {
+        LAST_SEEN_TIME_FORMATTER.format(
+            Instant.ofEpochMilli(observation.lastSeenAtMillis)
+                .atZone(ZoneId.systemDefault()),
+        )
+    }
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(observation.title, style = MaterialTheme.typography.titleMedium)
+                Text("最終 $lastSeenTime")
+            }
+            Text(observation.detail, style = MaterialTheme.typography.bodySmall)
+            if (observation.beaconSlots.isNotEmpty()) {
+                Text(
+                    "観測スロット ${observation.beaconSlots.size}件:\n" +
+                        observation.beaconSlots.joinToString("\n") { "・${it.label}" },
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            Text("RSSI ${observation.rssi} dBm / 広告 ${observation.seenCount}パケット")
+            if (observation.beaconLongPress == true) {
+                Text("最新パケット: 長押し")
+            }
+            if (observation.beaconBatteryLow == true) {
+                Text("電池低下", color = MaterialTheme.colorScheme.error)
+            }
+            val hasNewSlots = linkedDevice != null &&
+                !linkedDevice.beaconSlots.containsAll(observation.beaconSlots)
+            when {
+                hasNewSlots -> {
+                    Text("リンク済み（未登録のスロットあり）")
+                    Button(onClick = onLink, modifier = Modifier.fillMaxWidth()) {
+                        Text("観測スロットでリンクを更新")
+                    }
+                }
+                linkedDevice != null -> Text("リンク済み (${observation.suggestedTransport?.label})")
+                observation.suggestedTransport == TriggerTransport.GATT -> {
+                    Button(onClick = onLink, modifier = Modifier.fillMaxWidth()) {
+                        Text("GATT候補としてリンク")
+                    }
+                    Text("GATT接続は次段階で有効化します", style = MaterialTheme.typography.bodySmall)
+                }
+                observation.suggestedTransport == TriggerTransport.BEACON -> {
+                    Button(onClick = onLink, modifier = Modifier.fillMaxWidth()) {
+                        Text("このBeaconをリンク")
+                    }
+                    Text(
+                        "リンク後はこの機器のボタン1/2どちらの長押しでも発信候補になります（短押し・待機広告では発信しません）",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                else -> Text("観測のみ（リンク非対応）", style = MaterialTheme.typography.bodySmall)
+            }
+        }
     }
 }
 
@@ -450,11 +689,13 @@ private suspend fun reverseGeocode(
     latitude: Double,
     longitude: Double,
 ): String? = withContext(Dispatchers.IO) {
+    // Hackathon privacy policy: only the prefecture leaves the device. Never
+    // send/persist a full street-level address (getAddressLine would include it).
     runCatching {
         Geocoder(context, Locale.JAPAN)
             .getFromLocation(latitude, longitude, 1)
             ?.firstOrNull()
-            ?.getAddressLine(0)
+            ?.adminArea
     }.getOrNull()
 }
 
@@ -474,7 +715,21 @@ private fun Throwable.userMessage(): String = when (this) {
     else -> message ?: "不明なエラー"
 }
 
+private fun openWorldIdConnector(context: Context, connectorUri: String) {
+    val uri = Uri.parse(connectorUri)
+    val packageManager = context.packageManager
+    val worldPackages = listOf("org.world.id", "com.worldcoin")
+    val worldIntent = worldPackages
+        .asSequence()
+        .map { packageName ->
+            Intent(Intent.ACTION_VIEW, uri).setPackage(packageName)
+        }
+        .firstOrNull { intent -> intent.resolveActivity(packageManager) != null }
+    context.startActivity(worldIntent ?: Intent(Intent.ACTION_VIEW, uri))
+}
+
 private const val EMERGENCY_CONFIRM_WINDOW_MS = 10_000L
 private const val EVENT_STATUS_POLL_INTERVAL_MS = 2_000L
 private const val WORLD_ID_STATUS_POLL_INTERVAL_MS = 2_000L
 private val TERMINAL_EVENT_STATES = setOf("completed", "failed")
+private val LAST_SEEN_TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm:ss")
