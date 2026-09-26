@@ -2,7 +2,7 @@
 
 最終更新: 2026-09-26
 
-> 新しいセッションで作業を再開する場合は、本文書より先に `reference/handover.md`（壊してはいけない不変条件、環境・ビルド・デプロイ・確認コマンド、既知の落とし穴）を読むこと。本文書は設計の正本であり、必要な章だけを参照すればよい。
+> 新しいセッションで作業を再開する場合は、本文書より先に `doc/ja-jp/handover.md`（壊してはいけない不変条件、環境・ビルド・デプロイ・確認コマンド、既知の落とし穴）を読むこと。本文書は設計の正本であり、必要な章だけを参照すればよい。
 
 ### 2026-09-26 現在の優先判断（以下の旧フェーズ記述より優先）
 
@@ -41,7 +41,7 @@
   P2-12 で本書に先に確定してから実装する。無断の二重発信を避け、初期実験は失敗時に終了して手動で旧 SOS へ戻す。
 - 生音声を永続化しないが、電話音声はキャリア・Twilio・OpenAI へ流れる。利用者と同意済み参加者への説明、Discord 共有、
   出力ルート／音漏れを確認する。ローカル録音案（P2-09〜11）は別の代替として保持し、電話実験の前提にしない。
-- 調査・証拠・段階ゲート・ロールバックは **`reference/ambient-verification.md` 0章**、実験タスクは **P2-12〜16**。
+- 調査・証拠・段階ゲート・ロールバックは **`doc/ja-jp/ambient-verification.md` 0章**、実験タスクは **P2-12〜16**。
 
 ### キャリア会議実験の凍結契約（P2-12、2026-09-26、人間承認済み）
 
@@ -173,7 +173,7 @@ Discord 個別連絡の実データ構造・API 境界は P0-16 で本文書へ�
 **基本原則: モックを作らず、常に本物のスキーマ・本物のデータに対して実装を積み重ねる。** UI を先に作るか backend を先に作るかという二択ではなく、「backend の充実度に関わらず、UI は最初から本物の Firestore コレクションだけを見る」を徹底する。この原則が守られていれば、backend の機能がどれだけ後から増えても UI コードは変更不要になり、「モックと実装済みの混乱」が構造的に起きない。8a 章「認可・安全」の読み書き経路の固定契約（Android は Firestore を直接 read、write は必ず backend API 経由）はこの原則を支える前提であり、以後変更しない。
 
 1. **P0-14a/P0-15: 電話と iBeacon の実機 happy path は完了済み。** 短押し・待機広告では発信 0、長押し 1 回で実通話 1 件を確認。権限拒否や外部 API 障害の網羅は P3 に残す。
-2. **P0-16〜P0-20: Discord 個別 DM の MVP 主線を通す。** 実データの保存先（私的な招待/連絡先、イベントへの配送状態と返信）と API 契約を `doc/plan.md` で先に凍結し、本人確認付き招待→相手の明示同意→Bot テスト DM とボタン応答→実際の電話イベント発生時の DM→モーダル返信の保存まで、実際の Discord アカウントと Cloud Run/Firestore で検証する。既存の `emergency_events/{id}/updates` をこの **検証用の実イベント** の正本に用いる。ただし UI 用のダミーや一時 fixture は作らない。Bot の送信失敗・429・タイムアウトでも電話を止めず、二重 DM を抑える。
+2. **P0-16〜P0-20: Discord 個別 DM の MVP 主線を通す。** 実データの保存先（私的な招待/連絡先、イベントへの配送状態と返信）と API 契約を `doc/ja-jp/plan.md` で先に凍結し、本人確認付き招待→相手の明示同意→Bot テスト DM とボタン応答→実際の電話イベント発生時の DM→モーダル返信の保存まで、実際の Discord アカウントと Cloud Run/Firestore で検証する。既存の `emergency_events/{id}/updates` をこの **検証用の実イベント** の正本に用いる。ただし UI 用のダミーや一時 fixture は作らない。Bot の送信失敗・429・タイムアウトでも電話を止めず、二重 DM を抑える。
 3. **Discord 縦断フロー確認後、P2 の最小書き込みパスを実装する。** `emergencySessions`/`facts`/`state/current`/`timeline` への新規実イベントの保存を固め、Discord の返信も `friend_reply` fact と `friend_message` timeline に載せる。既存 `emergency_events` テストデータは移行しない。スキーマを変更する場合は必ず本書を先に修正する。
 4. **ここから Full UI と delegations 等を並行する。** Android は Firestore で本物の P2 コレクションを直接購読し、backend は同じスキーマへ書き込む。アプリ同士の Google 友人リンク・友人向け UI は将来の別判断とし、AI への第三者返信注入、GATT、録音も個別の後続作業とする。未実装画面はダミーを表示せず「準備中」と明示する。
 5. **残り時間のチェックポイント**: 電話/iBeacon の happy path は通過済み。Discord が受信者の同意または Bot の DM 到達条件で詰まれば実測した失敗を記録し、電話+iBeacon の動作するデモへ戻す。Discord の縦断フローが成立したら、その成果を維持した上で残り時間を Full UI・P2 に割く。
@@ -253,7 +253,7 @@ Discord 個別連絡の実データ構造・API 境界は P0-16 で本文書へ�
 
 アプリで「Discord の連絡先を招待」→相手の本人確認と通知同意→承認済み連絡先を表示→電話と並行して Bot が個別 DM を送信→相手の返信を緊急イベントの参考情報として記録する。**この方式は電話/iBeacon の happy path 完了後の MVP 主線であり、まだ未実装**。電話先 `contact_id` は維持し、Discord 通知の成功は電話発信成功の条件にしない。P0-14a/P0-15 の検証ゲートは通過済み。
 
-Portal アプリ・Bot token の発行と Secret Manager への安全な事前登録は完了。公開 Interactions endpoint の設定は署名検証/PING 応答をデプロイしてから、テスト DM は P0-18 の受信者同意後に送る。調査と手順は `reference/discord-integration.md` に記載。
+Portal アプリ・Bot token の発行と Secret Manager への安全な事前登録は完了。公開 Interactions endpoint の設定は署名検証/PING 応答をデプロイしてから、テスト DM は P0-18 の受信者同意後に送る。調査と手順は `doc/ja-jp/discord-integration.md` に記載。
 
 2026-09-26: ユーザーが Application ID と Public Key を控え、Bot token/OAuth Client Secret を Secret Manager に登録済み。対象 project の両 Secret の version 1 が `enabled` であることを**値を読み出さず**確認した。Discord Portal の Redirect URLs/Installation/Interactions 詳細設定や Cloud Run の Secret 割り当ては未実施。API から Bot token の有効性・DM 到達を確認した状態ではない。
 
@@ -1128,7 +1128,7 @@ Android fact が Firestore へ一度だけ保存され `state/current` へ反映
 - Google Maps Geocoding API key
 - World ID RP signing key: Secret `key-world-id-rp-signing`（version 1登録済み。Cloud Runでは`WORLD_ID_RP_SIGNING_KEY`として参照し、値は記録しない）
 
-秘密値はチャット、Git、README、`doc/plan.md`、コマンド出力へ掲載しない。Agent が Secret を生成または一度だけ受け取る場合は、表示せず Secret Manager へ直接保存してから利用する。Cloud Run ではサービスアカウントの Application Default Credentials を使い、可能な限り service account JSON key を作らない。
+秘密値はチャット、Git、README、`doc/ja-jp/plan.md`、コマンド出力へ掲載しない。Agent が Secret を生成または一度だけ受け取る場合は、表示せず Secret Manager へ直接保存してから利用する。Cloud Run ではサービスアカウントの Application Default Credentials を使い、可能な限り service account JSON key を作らない。
 
 ### 追跡する非秘密識別子
 
@@ -1190,7 +1190,7 @@ Android fact が Firestore へ一度だけ保存され `state/current` へ反映
 ### Phase 6: Discord 個別連絡の MVP 主線（P0-16〜P0-21、完了済み）
 
 - 相手の opt-in 招待・本人確認、Bot テスト DM、実電話イベントと並行した一度だけの DM、モーダル返信のイベント保存、通話書き起こしの DM 逐次中継を実アカウントで検証済み。
-- 2026-09-26: MVP 0.1 として保全（タグ `mvp-0.1`、`reference/mvp0.1.md`）。電話/iBeacon は主経路として維持し、Discord 障害は非致命的な配送失敗として表示する。
+- 2026-09-26: MVP 0.1 として保全（タグ `mvp-0.1`、`doc/ja-jp/mvp0.1.md`）。電話/iBeacon は主経路として維持し、Discord 障害は非致命的な配送失敗として表示する。
 
 World ID / IDKit は延期機能ではなく、実通話前の発信認可として実装する。`world-id-idkit` Skill と Developer Portal MCP を使い、RP signing key は会話やログを経由させず Secret Manager へ直接保存する。
 
@@ -1198,14 +1198,14 @@ World ID / IDKit は延期機能ではなく、実通話前の発信認可とし
 
 1a 章の実行順序の決定（2026-09-26、残り時間の目安 10 時間）に従う。
 
-1. アプリ内チャット風ライブ表示（`emergency_events/{id}/updates` を直接購読、新規スキーマなし、`doc/tasks.md` P1-16）。
+1. アプリ内チャット風ライブ表示（`emergency_events/{id}/updates` を直接購読、新規スキーマなし、`doc/ja-jp/tasks.md` P1-16）。
 2. 英語化・B2C 向け UI 整形（専用フェーズを設けず、以後触る画面から段階的に。P1-17）。
-3. 周辺音の先行評価（P2-07 配下の P2-12〜16、キャリア会議＋Twilio AI）。詳細は冒頭の優先判断と `reference/ambient-verification.md`。旧 P2-01/02 の状況ストア移行は不要、ローカル録音 P2-09〜11 は代替案。
+3. 周辺音の先行評価（P2-07 配下の P2-12〜16、キャリア会議＋Twilio AI）。詳細は冒頭の優先判断と `doc/ja-jp/ambient-verification.md`。旧 P2-01/02 の状況ストア移行は不要、ローカル録音 P2-09〜11 は代替案。
 4. World ID 再認証・解除と Passport/Selfie 対応（P1-18 → P1-19）。
 
 ### Phase X: GATT 移行（ストレッチゴール、最優先度は最低。Phase 7・P2・P3 が片付き、時間が余った場合のみ）
 
-タスクは `doc/tasks.md` の PX-06〜PX-13。
+タスクは `doc/ja-jp/tasks.md` の PX-06〜PX-13。
 
 - GATT 経路（6b 章）を追加し、`trigger_source: gatt` を Safety gate へ接続する。
 - `CONNECTED -> SUBSCRIBED -> READY` の接続維持、epoch/eventId によるイベント検証、ACK 処理を実装する。
@@ -1275,5 +1275,5 @@ Phase 7（GATT）着手前に決める項目（6c 章参照）:
 ## 15. 変更管理
 
 - ゴール、スコープ、アーキテクチャ、外部サービス、重要な判断が変わるたびにこの文書を更新する。
-- 実装タスク、依存関係、担当、完了条件は `doc/tasks.md` で管理する。
+- 実装タスク、依存関係、担当、完了条件は `doc/ja-jp/tasks.md` で管理する。
 - 計画変更と実装成果は意味のある小さな単位で Commit & Push し、ハッカソン中の時系列の作業証跡を残す。
