@@ -9,7 +9,7 @@ import { z } from "zod";
 
 import { authenticate, requireHumanVerification } from "./auth.js";
 import { config } from "./config.js";
-import { notifyDiscordContacts, registerDiscordRoutes } from "./discord.js";
+import { notifyDiscordContacts, registerDiscordRoutes, relayCallTranscript } from "./discord.js";
 import {
   injectEmergencyUpdate,
   isValidTwilioRequest,
@@ -89,7 +89,7 @@ registerMediaBridge(app, async (eventId, callSid) => {
     capturedAt: location?.captured_at ?? null,
     initialNote: (event.get("initial_note") as string | null) ?? null,
   };
-});
+}, (eventId, speaker, text) => relayCallTranscript(db, app.log, eventId, speaker, text));
 
 const contactSchema = z.object({
   name: z.string().trim().min(1).max(80),

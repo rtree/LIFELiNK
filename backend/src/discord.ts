@@ -21,7 +21,7 @@ declare module "fastify" {
 
 type DiscordApiResult = { ok: true; body: any } | { ok: false; status: number; code?: number };
 
-async function discordBotRequest(path: string, body: unknown): Promise<DiscordApiResult> {
+async function discordBotRequest(path: string, body: unknown, retried = false): Promise<DiscordApiResult> {
   if (!config.DISCORD_BOT_TOKEN) return { ok: false, status: 0 };
   const response = await fetch(`${DISCORD_API}${path}`, {
     method: "POST",
@@ -32,9 +32,18 @@ async function discordBotRequest(path: string, body: unknown): Promise<DiscordAp
     body: JSON.stringify(body),
   });
   const json = await response.json().catch(() => ({}));
+  if (response.status === 429 && !retried) {
+    await new Promise((resolve) => setTimeout(resolve, Math.min(5_000, Number(json?.retry_after ?? 1) * 1000)));
+    return discordBotRequest(path, body, true);
+  }
   if (!response.ok) return { ok: false, status: response.status, code: json?.code };
   return { ok: true, body: json };
 }
+
+const replyButtonRow = (eventId: string, label = "状況を返信") => ({
+  type: 1,
+  components: [{ type: 2, style: 1, label, custom_id: `reply:${eventId}` }],
+});
 
 async function sendDirectMessage(
   discordUserId: string,
@@ -361,11 +370,16 @@ export function registerDiscordRoutes(app: FastifyInstance, db: Firestore) {
             `発信者の友人「${authorName}」から Discord で返信がありました（未確認の第三者情報として伝えてください）: ${text}`,
           );
         if (delivered) await updateRef.update({ delivered_to_ai_at: FieldValue.serverTimestamp() });
-        return ephemeral(
-          delivered
-            ? "返信を記録し、通話中の AI に伝えました。ありがとうございます。"
-            : "返信を記録しました（通話は既に終了しているか、まだつながっていません）。",
-        );
+        return {
+          type: 4,
+          data: {
+            flags: 64,
+            content: delivered
+              ? `返信を記録し、通話中の AI に伝えました。「${text.slice(0, 80)}」`
+              : "返信を記録しました（通話は既に終了しているか、まだつながっていません）。",
+            components: [replyButtonRow(eventId, "続けて返信")],
+          },
+        };
       }
 
       return ephemeral("この操作には対応していません。");
@@ -421,4 +435,50 @@ export async function notifyDiscordContacts(
       if (!result.ok) log.warn({ status: result.status, code: result.code, emergencyEventId: event.eventId }, "Discord emergency DM failed");
     }),
   ).catch((error) => log.error({ error, emergencyEventId: event.eventId }, "Discord notification error"));
+}
+
+const transcriptQueues = new Map<string, Promise<void>>();
+
+// Persists each finalized call utterance and mirrors it to every friend already DM'd for this event, in order.
+export function relayCallTranscript(
+  db: Firestore,
+  log: FastifyInstance["log"],
+  eventId: string,
+  speaker: "contact" | "ai" | "system",
+  text: string,
+) {
+  const previous = transcriptQueues.get(eventId) ?? Promise.resolve();
+  const next = previous
+    .then(async () => {
+      const eventRef = db.collection("emergency_events").doc(eventId);
+      await eventRef.collection("updates").add({
+        type: speaker === "contact" ? "transcript_contact" : speaker === "ai" ? "transcript_ai" : "system",
+        author_type: speaker,
+        author_uid: null,
+        author_name: speaker === "contact" ? "電話の相手" : speaker === "ai" ? "LIFELiNK AI" : "システム",
+        text,
+        payload: null,
+        created_at: FieldValue.serverTimestamp(),
+        delivered_to_ai_at: null,
+      });
+      const recipients = await eventRef.collection("discord_notifications").where("status", "==", "sent").get();
+      const label = speaker === "contact" ? "📞 電話の相手" : speaker === "ai" ? "🤖 AI" : "ℹ️";
+      await Promise.all(
+        recipients.docs.map(async (recipient) => {
+          const channelId = recipient.get("channel_id") as string | undefined;
+          if (!channelId) return;
+          const result = await discordBotRequest(`/channels/${channelId}/messages`, {
+            content: `${label}: ${text.slice(0, 1800)}`,
+            allowed_mentions: { parse: [] },
+            components: [replyButtonRow(eventId)],
+          });
+          if (!result.ok) log.warn({ status: result.status, code: result.code, emergencyEventId: eventId }, "Discord transcript relay failed");
+        }),
+      );
+    })
+    .catch((error) => log.error({ error, emergencyEventId: eventId }, "Call transcript relay error"));
+  transcriptQueues.set(eventId, next);
+  void next.finally(() => {
+    if (transcriptQueues.get(eventId) === next) transcriptQueues.delete(eventId);
+  });
 }

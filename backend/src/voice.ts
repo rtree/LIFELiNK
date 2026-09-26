@@ -135,12 +135,15 @@ function buildInitialMessage(context: InitialContext): string {
   ].join(" ");
 }
 
+export type CallTranscriptSpeaker = "contact" | "ai" | "system";
+
 export function registerMediaBridge(
   app: FastifyInstance,
   loadInitialContext: (
     eventId: string,
     callSid: string,
   ) => Promise<InitialContext | null>,
+  onTranscript: (eventId: string, speaker: CallTranscriptSpeaker, text: string) => void,
 ): void {
   app.get("/v1/twilio/media", { websocket: true }, (twilioSocket, request) => {
     if (!isValidTwilioRequest(request, "wss")) {
@@ -193,6 +196,7 @@ export function registerMediaBridge(
             audio: {
               input: {
                 format: { type: "audio/pcmu" },
+                transcription: { model: "gpt-4o-mini-transcribe", language: "ja" },
                 turn_detection: {
                   type: "server_vad",
                   create_response: true,
@@ -267,7 +271,15 @@ export function registerMediaBridge(
       const event = JSON.parse(rawMessage.toString()) as {
         type: string;
         delta?: string;
+        transcript?: string;
       };
+      if (emergencyEventId && event.transcript?.trim()) {
+        if (event.type === "conversation.item.input_audio_transcription.completed") {
+          onTranscript(emergencyEventId, "contact", event.transcript.trim());
+        } else if (event.type === "response.output_audio_transcript.done") {
+          onTranscript(emergencyEventId, "ai", event.transcript.trim());
+        }
+      }
       if (
         streamSid &&
         event.delta &&
@@ -317,6 +329,7 @@ export function registerMediaBridge(
         },
         "Twilio Media Stream closed",
       );
+      if (emergencyEventId) onTranscript(emergencyEventId, "system", "通話が終了しました");
       closeBoth();
     });
     openAiSocket.on("close", (code, reason) => {
