@@ -156,6 +156,15 @@ P2-09〜11 は独立録音の代替案として保留し、この電話実験の
 | PX-12 | P1-14 | TODO | `device-test`: adb ハーネスとログ収集で 6c 章の実機試験 matrix・シナリオ・合格指標を実施する | PX-07〜PX-11 | `READY` 時間率・押下受信率・再接続時間が観測値として記録され、初期合格案を満たすか判定できる |
 | PX-13 | P1-15 | TODO | GATT 経路を `trigger_source: gatt` として Safety gate へ接続し、Beacon へのフォールバックを実装する | PX-07〜PX-12 | `CONNECTED -> SUBSCRIBED -> READY` を維持し、長押し一回が Notify 一回・受信一回・ACK 一回になる。GATT 不通時は Beacon 経路にフォールバックする |
 
+## World ID 認可の監査で判明した未対応（2026-09-27）
+
+| 状態 | 課題 | 完了条件 |
+| --- | --- | --- |
+| TODO | **認証解除後の旧 ID token**: `setCustomUserClaims()` は発行済み token の claim を書き換えない。Android は `getIdToken(true)` で更新するが、旧 token を保存した API 呼び出しに対する backend の即時拒否は未実装。Firebase token の失効とサーバー側の最新認可状態照合を検討する。 | 解除前に取得した token で SOS を呼んでも event と発信が作られないことをテストする。 |
+| TODO | **再認証 action と一人一アカウント**: 初回 action の nullifier は別 UID への重複紐付けを transaction で防ぐ一方、`-reverify-<uuid>` は action ごとに nullifier が変わり、`world_id_reverifications` に記録するだけで元の人間との同一性は比較しない。 | 初回・再認証・別 UID のクロスアカウント検証を設計し、別人の証明で既存 UID を再認証できず、同一人間による別 UID の初回認証もできないことをテストする。 |
+
+これらが完了するまでは、README に「一人一 ID の厳密保証」「解除直後から旧 token も通らない」と書かない。警察・警備会社への自動通報も未実装で、別途合意・濫用対策が必要。
+
 ## 次のアクション
 
 **2026-09-26 時点で MVP 主線（P0-01〜P0-21）は完了し、MVP 0.1 として保全済み**（`doc/ja-jp/mvp0.1.md`、タグ `mvp-0.1`、Firestore export `gs://ethglobaltokyo2026lifelink-firestore-backups/mvp-0.1-2026-09-26`）。壊れたらここへ戻る。
