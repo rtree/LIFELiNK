@@ -1,7 +1,7 @@
 rules_version = '2';
 
 // LIFELiNK Firestore security rules skeleton.
-// Design source: doc/plan.md sections 6, 6a, 9.
+// Design source: doc/ja-jp/plan.md sections 6, 6a, 9.
 //
 // All writes to app data currently happen through the Cloud Run backend using
 // the Firebase Admin SDK, which bypasses these rules entirely. Client apps
@@ -44,7 +44,7 @@ service cloud.firestore {
         allow write: if false;
       }
 
-      // users/{uid}/discordContacts/{discord_user_id} (doc/plan.md P0-16)
+      // users/{uid}/discordContacts/{discord_user_id} (doc/ja-jp/plan.md P0-16)
       match /discordContacts/{discordUserId} {
         allow read: if isOwner(uid);
         allow write: if false;
@@ -86,7 +86,7 @@ service cloud.firestore {
       }
     }
 
-    // emergencySessions/{session_id} — P2 target schema, doc/plan.md 8a.
+    // emergencySessions/{session_id} — P2 target schema, doc/ja-jp/plan.md 8a.
     // Root-level (2026-09-26, reverted from a users/{uid}-nested design):
     // friend-sharing is the primary access pattern here, and a flat collection
     // keeps "shared with me" a plain participant_uids query instead of a
