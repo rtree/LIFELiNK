@@ -136,5 +136,5 @@ ssh beacon-host '"$HOME/Library/Android/sdk/platform-tools/adb" -s RFGL41GKP0Z l
 
 1. 作業で得た「ここにしか無い知識」を本ファイル 2・5・6 節へ追記する。
 2. 決定と理由を `doc/ja-jp/plan.md` へ、次の一手を `doc/ja-jp/tasks.md`「次のアクション」へ反映する。
-3. 実機で確認した事実は `reference/` の該当ファイルへ観測値付きで残す。
+3. 実機で確認した事実は `doc/ja-jp/` の該当ファイルへ観測値付きで残す。
 4. コミットして push し、作業ツリーを clean にしてから終わる。
