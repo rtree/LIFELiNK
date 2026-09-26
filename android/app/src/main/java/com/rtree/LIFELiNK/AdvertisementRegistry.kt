@@ -67,6 +67,7 @@ data class BeaconLogEntry(
 object AdvertisementRegistry {
     private const val APPLE_COMPANY_ID = 0x004c
     private const val MAX_LOG_ENTRIES = 300
+    private const val RECEPTION_GAP_LOG_MS = 3_000L
     private const val LOG_TAG = "LIFELiNK.BeaconLog"
     const val XIAO_MODEL_INFO = "Seeed XIAO nRF52840 / FCC ID Z4T-XIAONRF52840 / 技適 211-220207"
 
@@ -76,6 +77,19 @@ object AdvertisementRegistry {
     private val mutableBeaconLog = MutableStateFlow<List<BeaconLogEntry>>(emptyList())
     val beaconLog = mutableBeaconLog.asStateFlow()
     private val lastIBeaconStateByAddress = mutableMapOf<String, String>()
+    private var lastLinkedPacketAtMillis = 0L
+
+    // Logs when linked-button reception resumes after a silence; the idle slot advertises about every 1s.
+    @Synchronized
+    fun noteLinkedPacket(context: Context, packetAtMillis: Long) {
+        val previous = lastLinkedPacketAtMillis
+        if (packetAtMillis <= previous) return
+        lastLinkedPacketAtMillis = packetAtMillis
+        val gapMs = packetAtMillis - previous
+        if (previous != 0L && gapMs >= RECEPTION_GAP_LOG_MS) {
+            appendBeaconLog("受信再開: ${"%.1f".format(gapMs / 1000.0)}秒ぶり ${screenState(context)}")
+        }
+    }
 
     @Synchronized
     fun appendBeaconLog(text: String, atMillis: Long = System.currentTimeMillis()) {

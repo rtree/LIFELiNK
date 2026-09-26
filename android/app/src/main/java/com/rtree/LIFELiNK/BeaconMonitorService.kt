@@ -5,8 +5,10 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
@@ -26,6 +28,7 @@ import kotlinx.coroutines.launch
 // Keeps the Beacon scan owned by a visible foreground service so the OS does not freeze the app while locked.
 class BeaconMonitorService : Service() {
     private var scope: CoroutineScope? = null
+    private var screenReceiver: BroadcastReceiver? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -55,15 +58,43 @@ class BeaconMonitorService : Service() {
             "見守り開始（常駐通知あり）filter=$filterCount バッテリー最適化除外=${isIgnoringBatteryOptimizations(this)}",
         )
         startHeartbeat()
+        registerScreenReceiver()
         return START_NOT_STICKY
     }
 
     override fun onDestroy() {
+        screenReceiver?.let(::unregisterReceiver)
+        screenReceiver = null
         scope?.cancel()
         scope = null
         mutableRunning.value = false
         AdvertisementRegistry.appendBeaconLog("見守りサービス終了")
         super.onDestroy()
+    }
+
+    private fun registerScreenReceiver() {
+        if (screenReceiver != null) return
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                val label = when (intent.action) {
+                    Intent.ACTION_SCREEN_OFF -> "画面OFF"
+                    Intent.ACTION_SCREEN_ON -> "画面ON"
+                    Intent.ACTION_USER_PRESENT -> "ロック解除"
+                    else -> return
+                }
+                val charging = context.getSystemService(android.os.BatteryManager::class.java)?.isCharging == true
+                AdvertisementRegistry.appendBeaconLog("$label 充電=${if (charging) "中" else "なし"}")
+            }
+        }
+        registerReceiver(
+            receiver,
+            IntentFilter().apply {
+                addAction(Intent.ACTION_SCREEN_OFF)
+                addAction(Intent.ACTION_SCREEN_ON)
+                addAction(Intent.ACTION_USER_PRESENT)
+            },
+        )
+        screenReceiver = receiver
     }
 
     private fun startHeartbeat() {

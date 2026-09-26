@@ -189,6 +189,7 @@ class BeaconReceiver : BroadcastReceiver() {
         var pressed: Pair<ScanResult, String>? = null
         fresh.sortedBy { it.timestampNanos }.forEach { packet ->
             val identity = AdvertisementRegistry.parseIBeacon(packet) ?: return@forEach
+            AdvertisementRegistry.noteLinkedPacket(context, AdvertisementRegistry.packetWallMillis(packet))
             val reason = safetyGate.observeBeaconState(
                 stateKey = "${identity.slot.label}|${identity.longPress}",
                 pressed = identity.slot != idleSlot,
