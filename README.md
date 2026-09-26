@@ -14,6 +14,21 @@ In the default **SOSV2-ambientMode**, the phone itself also joins: with LIFELiNK
 
 > **Scope, not a safety guarantee:** This is a hackathon prototype for contacting *people you have registered*, not an emergency-services/119/110 dispatch system. It cannot guarantee BLE reception, a successful call, an accurate location, or a timely response. Do not rely on it as your sole way to get help.
 
+## Documentation / ドキュメント
+
+日本語はこちら: [doc/ja-jp](doc/ja-jp) · English: [doc/en](doc/en)
+
+| 日本語 | English |
+| --- | --- |
+| [plan.md](doc/ja-jp/plan.md) — ゴール・要件・設計 | [plan.md](doc/en/plan.md) |
+| [tasks.md](doc/ja-jp/tasks.md) — タスクと進捗 | [tasks.md](doc/en/tasks.md) |
+| [handover.md](doc/ja-jp/handover.md) — 引き継ぎ・不変条件 | [handover.md](doc/en/handover.md) |
+| [mvp0.1.md](doc/ja-jp/mvp0.1.md) — MVP 0.1 検証記録 | [mvp0.1.md](doc/en/mvp0.1.md) |
+| [host-setup.md](doc/ja-jp/host-setup.md) — 環境構築手順 | [host-setup.md](doc/en/host-setup.md) |
+| [ambient-verification.md](doc/ja-jp/ambient-verification.md) — SOSV2 検証 | [ambient-verification.md](doc/en/ambient-verification.md) |
+| [beacon-verification.md](doc/ja-jp/beacon-verification.md) — +Beacon 検証 | [beacon-verification.md](doc/en/beacon-verification.md) |
+| [discord-integration.md](doc/ja-jp/discord-integration.md) — Discord 連携 | [discord-integration.md](doc/en/discord-integration.md) |
+
 ## One-liner
 
 **World ID makes a costly real-world action—placing an automated emergency call—available to a verified human without making the app collect their legal identity.**
