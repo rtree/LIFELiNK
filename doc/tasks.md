@@ -64,7 +64,7 @@ MVP 主線（P0-01〜P0-21）は完了し `mvp-0.1` として保全済み。こ�
 
 | ID | 状態 | タスク | 依存 | 完了条件 |
 | --- | --- | --- | --- | --- |
-| P1-16 | TODO | Android に緊急イベントのチャット風ライブ表示画面を実装する。`emergency_events/{id}/updates` を時系列購読し、`note`/`location`/`transcript_contact`/`transcript_ai`/`friend_comment`/`system` を種類ごとに整形して表示する（Discord チャンネル風または WhatsApp 風、uimock のテイストに近い方を採用） | P0-21（MVP 0.1 保全済み） | 実際の緊急イベントで、通話の書き起こしと Discord 友人からの返信が届いた順にアプリ内へ表示される。ダミーデータは使わない。P2 移行後に購読先を `timeline` へ切り替えられるよう整形ロジックをデータ源から分離する |
+| P1-16 | IN PROGRESS | Android に緊急イベントのチャット風ライブ表示画面を実装する。`emergency_events/{id}/updates` を時系列購読し、`note`/`location`/`transcript_contact`/`transcript_ai`/`friend_comment`/`system` を種類ごとに整形して表示する（Discord チャンネル風または WhatsApp 風、uimock のテイストに近い方を採用） | P0-21（MVP 0.1 保全済み） | 2026-09-26: 実装・実機導入済み（`firebase-firestore` 依存追加、`EmergencyFeed.kt`=表示モデルと mapper、`EmergencyFeedSource.kt`=Firestore listener、`EmergencyFeedSection.kt`=WhatsApp 風 UI、方針は `doc/plan.md` 6a 章）。実機で本物の最新イベント（`completed`/`ble`）のヘッダ、`system` の「通話が終了しました」、Discord 友人の `friend_comment` バブルが表示されることを確認。**残: 実通話を 1 回行い `transcript_contact`/`transcript_ai`/`note` が届いた順に出ることを確認する**（直近イベントが書き起こしなしの短い Beacon テストだったため未検証） |
 | P1-17 | TODO | 英語化と B2C 向け UI 整形を段階的に進める（専用フェーズは設けず、P1-16 以降で触る画面から順に文言・配色・導線を整える） | P1-16 | 触れた画面から順に英語表示になり、検証用 1 画面 UI ではなく一般利用者向けの体裁になっている。未実装機能はダミーではなく「準備中」と表示する |
 | P1-18 | TODO | World ID の再認証・認証解除の設定画面と API を実装する（`backend/src/worldid.ts` に追加） | P2-07 完了後（`doc/plan.md` 1a 章の実行順序） | 認証切れ・失効後に設定画面から再認証でき、認証解除操作で `human_verified` claim が外れて緊急発信が再びブロックされることを実機で確認する |
 | P1-19 | TODO | IDKit の `credential_types` に Passport/Selfie Check を追加する | P1-18 | Proof of Human に加えて Passport または Selfie Check でも認証が成立し、`human_verified` claim が同様に付与される |
@@ -123,8 +123,8 @@ MVP 主線（P0-01〜P0-21）は完了し `mvp-0.1` として保全済み。こ�
 
 ここからの実行順（`doc/plan.md` 1a 章の決定、残り時間目安 10 時間）:
 
-1. **P1-16**: アプリ内チャット風ライブ表示（`emergency_events/{id}/updates` を直接購読、新スキーマなし）。
-2. **P1-17**: 触る画面から段階的に英語化・B2C 向け UI 整形。
+1. **P1-16**: アプリ内チャット風ライブ表示（`emergency_events/{id}/updates` を直接購読、新スキーマなし）。**実装・実機導入済み。残るのは実通話 1 回での書き起こし表示確認だけ**。
+2. **P1-17**: 触る画面から段階的に英語化・B2C 向け UI 整形。ライブフィードは英語で作ったが、backend が書く `author_name`（「電話の相手」「システム」）と `system` 本文は日本語のままなので backend 側も揃える。
 3. **P2-01/P2-02 → P2-07**: P2 最小書き込みパスを通してから周辺情報蓄積（`ambient_observation`）。
 4. **P1-18 → P1-19**: World ID 再認証・解除、Passport/Selfie 対応。
 5. P3（失敗系・長時間ロック）はこの後。PX（アプリ内友人リンク、GATT）は時間が余った場合のみ。

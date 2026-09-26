@@ -402,6 +402,14 @@ Discord 個別 DM（4a 章）の先行検証と、将来選択肢の LIFELiNK �
 
 P0 実装は `type: note` と `type: location` だけを書き込めばよく、このスキーマのまま後方互換になる。P1 では `friend_comment`、`transcript_contact`、`transcript_ai` を追加するだけで Discord 風 UI に必要なデータが揃う。
 
+### Android ライブフィードの実装方針（P1-16、2026-09-26 決定）
+
+- Android は backend API を経由せず **Firestore を直接 read** する（write は従来どおり backend のみ。8a 章の固定契約と同じ）。`GET /v1/emergency-events` のような一覧 API は追加しない（9 章の未実装項目は当面不要と判断）。
+- 購読対象は「自分が owner の最新イベント 1 件」。`emergency_events` を `uid == 自分` + `created_at DESC` + `limit(1)` で listen し、その `updates` を `created_at ASC` で listen する。画面ボタン発信と Beacon 発信のどちらでも同じ経路で表示でき、アプリ再起動後も直近イベントが復元される。複合インデックスは `uid + created_at DESC` が既存（`firestore.indexes.json`）、`updates` は単一フィールドの自動インデックスで足りる。
+- **整形はデータ源から分離する**: `EmergencyFeed.kt` が Firestore 型に依存しない表示モデル（`EmergencyFeedEntry` / `EmergencyFeedKind`）と mapper を持ち、`EmergencyFeedSource.kt` が Firestore listener だけを持つ。P2 で購読先を `timeline` へ切り替えるときは `EmergencyFeedSource.kt` だけを差し替える。
+- 表示は WhatsApp 風のバブル（自分のメモ・位置は右寄せ、通話相手／AI／Discord 友人は左寄せ、`system` は中央の細字）。文言は P1-17 の方針に従い新規画面から英語にする（backend が書く `author_name`・`system` の本文は日本語のまま残るため、英語化は P1-17 で backend 側も揃える）。
+- `LazyColumn` は親の `verticalScroll` の中に置くため `heightIn(max = 360.dp)` で上限を与える（`height` 固定にすると発言が少ないときに空白が残る）。
+
 ### Firestore rules の方針
 
 - `emergency_events` の read は `participant_uids` 配列のみで判定する。

@@ -57,6 +57,7 @@ dependencies {
     implementation("com.google.android.gms:play-services-location:21.4.0")
     implementation("com.google.android.libraries.identity.googleid:googleid:1.2.1")
     implementation("com.google.firebase:firebase-auth")
+    implementation("com.google.firebase:firebase-firestore")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.10.2")
 
     debugImplementation("androidx.compose.ui:ui-tooling")

@@ -93,6 +93,7 @@ private fun SetupScreen() {
                 ?: "Googleでログインしてください",
         )
     }
+    var signedInUid by remember { mutableStateOf(initialUser?.uid) }
     var worldIdStatus by remember { mutableStateOf("World ID人間証明は未完了です") }
     var pendingWorldIdFlowId by remember { mutableStateOf(emergencyPreferences.worldIdFlowId) }
     var locationText by remember { mutableStateOf("位置情報はまだ保存されていません") }
@@ -238,6 +239,7 @@ private fun SetupScreen() {
             onClick = {
                 scope.launch {
                     status = signInWithGoogle(context)
+                    signedInUid = FirebaseAuth.getInstance().currentUser?.uid
                 }
             },
         ) {
@@ -422,6 +424,9 @@ private fun SetupScreen() {
         ) {
             Text("通話中メモを送信")
         }
+        Spacer(Modifier.height(12.dp))
+        EmergencyFeedSection(uid = signedInUid)
+        Spacer(Modifier.height(12.dp))
         Text(beaconText)
         Row(
             modifier = Modifier.fillMaxWidth(),

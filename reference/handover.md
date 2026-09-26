@@ -8,7 +8,7 @@
 
 - MVP 主線（P0-01〜P0-21）は完了し、**タグ `mvp-0.1`** と `reference/mvp0.1.md` で保全済み。壊したらここへ戻る。
 - 動く縦断フロー: 物理ボタン（+Beacon）or 画面ボタン → Safety gate → Cloud Run → Twilio が登録先へ電話 → OpenAI Realtime の AI が都道府県とメモを話す → 同時に Discord Bot が同意済み友人へ DM → 通話の書き起こしを DM へ逐次中継 → 友人の返信が同じイベントに保存され通話中の AI に伝わる。
-- 次にやること: `doc/tasks.md`「次のアクション」の順（P1-16 チャット UI → P1-17 段階的英語化/B2C UI → P2-01/02 → P2-07 → P1-18/19）。
+- 次にやること: `doc/tasks.md`「次のアクション」の順（P1-16 チャット UI→ 実装済み、実通話での transcript 表示確認が残る → P1-17 段階的英語化/B2C UI → P2-01/02 → P2-07 → P1-18/19）。
 
 ## 2. 壊してはいけない不変条件
 
@@ -18,7 +18,7 @@
 | gcloud/firebase は**必ず `--project=ethglobaltokyo2026lifelink`** | ホストの `gcloud config` 既定は別プロジェクト（旧ハッカソンの `beacontesttokyo`）。付け忘れると無関係な資源を見て誤診する。 |
 | World ID の app/RP/action は**再作成しない** | `app_30fbdcf47be73f8a3603f0633b8aeb7c` / `rp_f73bfaa54987b8ce` / action `verify-emergency-caller`（production）は本番登録済み。作り直すと既存の証明・署名鍵が無効になる。鍵は Secret `key-world-id-rp-signing`。 |
 | Twilio の発信番号は Secret `key-twilio-from-number`（SID `PN25e30a4c7e287953ff4ebce4d33c3771`）**のみ** | 同一アカウントに旧プロジェクト用の番号（+1629280xxxx）も居る。そちらを触ると無関係な設定を壊す。 |
-| Firestore への**書き込みは backend（Admin SDK）だけ** | クライアント書き込みは rules で全面拒否済み。Android から直接書く実装を足さない（読みは直接 OK）。 |
+| Firestore への**書き込みは backend（Admin SDK）だけ** | クライアント書き込みは rules で全面拒否済み。Android から直接書く実装を足さない（読みは直接 OK。P1-16 のライブフィードが実際に直接 read している）。 |
 | **モック・ダミーデータを作らない** | `.github/copilot-instructions.md` の方針。UI は最初から本物の Firestore コレクションだけを読む。未実装は「準備中」と表示する。 |
 | P0 の `emergency_events`/`updates` の既存データを**移行・削除しない** | MVP 0.1 の実機検証の証跡。P2 は新規イベントから `emergencySessions` を使う。バックアップ: `gs://ethglobaltokyo2026lifelink-firestore-backups/mvp-0.1-2026-09-26`。 |
 | 音声は **G.711 μ-law / 8kHz / mono（`audio/pcmu`）** | Twilio Media Streams と OpenAI Realtime の両端でこの形式に揃えてある。片側だけ変えると無音・雑音・書き起こし失敗になる。 |
@@ -93,13 +93,15 @@ ssh beacon-host '"$HOME/Library/Android/sdk/platform-tools/adb" -s RFGL41GKP0Z l
 - **画面 OFF 中は BLE の受信が OS に間引かれる**（60 秒あたり 5〜14 パケット、空白 11〜23 秒）。送信時間 60 秒・途切れ判定 75 秒はこの実測に基づく決定であり、短くすると取りこぼす。代償として同じボタンの連打は 75 秒間 1 回として扱われる。
 - **Firestore の indexes は rules と別デプロイ**。忘れると一覧クエリが "requires an index" で落ちる。
 - `sanitizeLocationForPersistence()` は名前に反して **`accuracy_m` は意図的に残す**（位置を明かさない数値のため）。消すのは緯度・経度と番地レベルの住所だけ。
+- **Compose の `LazyColumn` を親の `verticalScroll` の中に置くときは `heightIn(max = ...)` を付ける**。無制限だとクラッシュし、`height` 固定だと発言が少ないときに大きな空白が残る（P1-16 で実際に踏んだ）。
+- **ライブフィードは「自分が owner の最新イベント 1 件」だけを表示する**。画面ボタン発信も Beacon 発信も同じ経路で拾えるが、過去イベントの選択 UI はない。実機検証で transcript が見たいときは新しい実通話を 1 回行う必要がある。
 
 ## 6. 既知のギャップ（バグではなく、把握済みの未対応）
 
 | 項目 | 状態 | 追跡先 |
 | --- | --- | --- |
 | Beacon リンク情報のアカウント同期 | 設計のみ（`users/{uid}/linkedTriggers` 案） | `doc/plan.md` 6 章・1a 章 1 |
-| `GET /v1/contacts` / `GET /v1/emergency-events`（一覧系） | 設計にはあるが未実装。単一画面 UI では不要だった | `doc/plan.md` 9 章、P1-16 着手時に要否を判断 |
+| `GET /v1/contacts` / `GET /v1/emergency-events`（一覧系） | **実装しないと決定**（P1-16）。ライブフィードは Android から Firestore を直接 read する | `doc/plan.md` 6a 章「Android ライブフィードの実装方針」 |
 | P2（`emergencySessions`/`facts`/`timeline`/`delegations`） | スキーマ凍結・rules と indexes はデプロイ済み、実装ゼロ | `doc/tasks.md` P2-01〜P2-07 |
 | Full UI（`doc/uimock/` の 20 画面） | 設計凍結済み、実装は検証用 1 画面のみ | `doc/plan.md` 4a 章、P1-16/P1-17 |
 | 英語化 | 文言は Kotlin 内にハードコードされた日本語（約 80 箇所、`MainActivity.kt` に集中）。`values-en` なし | P1-17（触る画面から段階的に） |
