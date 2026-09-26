@@ -55,8 +55,8 @@ class EmergencySafetyGate(context: Context) {
         // Gap must exceed the button's burst: screen-off delivery can gap >40s inside a single 60s burst.
         val gapMs = (burstSeconds + BEACON_GAP_MARGIN_SECONDS) * 1000L
         return when {
-            lastKey != stateKey -> "状態切替"
-            packetAtMillis - lastAt > gapMs -> "${gapMs / 1000}秒ぶり"
+            lastKey != stateKey -> "state change"
+            packetAtMillis - lastAt > gapMs -> "after ${gapMs / 1000}s"
             else -> null
         }
     }

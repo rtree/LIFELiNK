@@ -34,7 +34,7 @@ class BeaconMonitorService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
-            AdvertisementRegistry.appendBeaconLog("見守り停止（通知の停止操作）")
+            AdvertisementRegistry.appendBeaconLog("Monitoring stopped (stop action from notification)")
             stopMonitoring()
             return START_NOT_STICKY
         }
@@ -49,13 +49,13 @@ class BeaconMonitorService : Service() {
             },
         )
         val filterCount = runCatching { BeaconTriggerManager.start(this) }.getOrElse { error ->
-            AdvertisementRegistry.appendBeaconLog("見守り開始失敗: ${error.message}")
+            AdvertisementRegistry.appendBeaconLog("Monitoring start failed: ${error.message}")
             stopMonitoring()
             return START_NOT_STICKY
         }
         mutableRunning.value = true
         AdvertisementRegistry.appendBeaconLog(
-            "見守り開始（常駐通知あり）filter=$filterCount バッテリー最適化除外=${isIgnoringBatteryOptimizations(this)}",
+            "Monitoring started (ongoing notification) filter=$filterCount batteryOptimizationExempt=${isIgnoringBatteryOptimizations(this)}",
         )
         startHeartbeat()
         registerScreenReceiver()
@@ -68,7 +68,7 @@ class BeaconMonitorService : Service() {
         scope?.cancel()
         scope = null
         mutableRunning.value = false
-        AdvertisementRegistry.appendBeaconLog("見守りサービス終了")
+        AdvertisementRegistry.appendBeaconLog("Monitoring service destroyed")
         super.onDestroy()
     }
 
@@ -77,13 +77,13 @@ class BeaconMonitorService : Service() {
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
                 val label = when (intent.action) {
-                    Intent.ACTION_SCREEN_OFF -> "画面OFF"
-                    Intent.ACTION_SCREEN_ON -> "画面ON"
-                    Intent.ACTION_USER_PRESENT -> "ロック解除"
+                    Intent.ACTION_SCREEN_OFF -> "screen OFF"
+                    Intent.ACTION_SCREEN_ON -> "screen ON"
+                    Intent.ACTION_USER_PRESENT -> "unlocked"
                     else -> return
                 }
                 val charging = context.getSystemService(android.os.BatteryManager::class.java)?.isCharging == true
-                AdvertisementRegistry.appendBeaconLog("$label 充電=${if (charging) "中" else "なし"}")
+                AdvertisementRegistry.appendBeaconLog("$label charging=${if (charging) "yes" else "no"}")
             }
         }
         registerReceiver(
@@ -104,7 +104,7 @@ class BeaconMonitorService : Service() {
                 while (true) {
                     delay(HEARTBEAT_INTERVAL_MS)
                     AdvertisementRegistry.appendBeaconLog(
-                        "見守り中 heartbeat ${AdvertisementRegistry.screenState(this@BeaconMonitorService)}",
+                        "Monitoring heartbeat ${AdvertisementRegistry.screenState(this@BeaconMonitorService)}",
                     )
                 }
             }
@@ -120,8 +120,8 @@ class BeaconMonitorService : Service() {
     private fun buildNotification(): Notification {
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(
-            NotificationChannel(CHANNEL_ID, "LIFELiNK 見守り", NotificationManager.IMPORTANCE_LOW).apply {
-                description = "物理ボタンを待ち受けている間ずっと表示されます。表示が消えたら見守りは止まっています。"
+            NotificationChannel(CHANNEL_ID, "LIFELiNK monitoring", NotificationManager.IMPORTANCE_LOW).apply {
+                description = "Shown the whole time LIFELiNK is waiting for your button. If it disappears, monitoring has stopped."
             },
         )
         val openApp = PendingIntent.getActivity(
@@ -136,16 +136,16 @@ class BeaconMonitorService : Service() {
             Intent(this, BeaconMonitorService::class.java).setAction(ACTION_STOP),
             PendingIntent.FLAG_IMMUTABLE,
         )
-        val mode = if (EmergencyPreferences(this).beaconDryRun) "ドライラン（発信しません）" else "長押しで緊急発信します"
+        val mode = if (EmergencyPreferences(this).beaconDryRun) "dry run (no alert sent)" else "long press sends an alert"
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
-            .setContentTitle("LIFELiNK 見守り中")
-            .setContentText("物理ボタン待機中・$mode")
+            .setContentTitle("LIFELiNK is monitoring")
+            .setContentText("Waiting for your button • $mode")
             .setOngoing(true)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .setContentIntent(openApp)
-            .addAction(0, "見守りを停止", stop)
+            .addAction(0, "Stop monitoring", stop)
             .build()
     }
 

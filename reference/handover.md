@@ -8,7 +8,7 @@
 
 - MVP 主線（P0-01〜P0-21）は完了し、**タグ `mvp-0.1`** と `reference/mvp0.1.md` で保全済み。壊したらここへ戻る。
 - 動く縦断フロー: 物理ボタン（+Beacon）or 画面ボタン → Safety gate → Cloud Run → Twilio が登録先へ電話 → OpenAI Realtime の AI が都道府県とメモを話す → 同時に Discord Bot が同意済み友人へ DM → 通話の書き起こしを DM へ逐次中継 → 友人の返信が同じイベントに保存され通話中の AI に伝わる。
-- 次にやること: `doc/tasks.md`「次のアクション」の順。**P1-16（チャット UI）は 2026-09-26 15:08 に実通話で確認して完了**。次は P1-17（段階的英語化/B2C UI）→ P2-01/02 → P2-07 → P1-18/19。
+- 次にやること: `doc/tasks.md`「次のアクション」の順。**P1-16（チャット UI）と P1-17（英語化・3 タブの B2C UI）は 2026-09-26 に実機確認して完了**。次は P2-01/02 → P2-07 → P1-18/19。
 
 ## 2. 壊してはいけない不変条件
 
@@ -23,6 +23,7 @@
 | P0 の `emergency_events`/`updates` の既存データを**移行・削除しない** | MVP 0.1 の実機検証の証跡。P2 は新規イベントから `emergencySessions` を使う。バックアップ: `gs://ethglobaltokyo2026lifelink-firestore-backups/mvp-0.1-2026-09-26`。 |
 | 音声は **G.711 μ-law / 8kHz / mono（`audio/pcmu`）** | Twilio Media Streams と OpenAI Realtime の両端でこの形式に揃えてある。片側だけ変えると無音・雑音・書き起こし失敗になる。 |
 | スキーマは**コードより先に `doc/plan.md` を直す** | 6 章・6a 章・「P0-16 凍結スキーマ・API」・8a 章が正本。`firestore.rules` / `firestore.indexes.json` はその従属物。 |
+| **AI が電話で話す日本語を英語にしない** | アプリ UI は英語だが、`voice.ts` の `buildInitialMessage` / `instructions` / `injectEmergencyUpdate` と `server.ts` の AI 注入文は日本語が正しい。受け手は日本語話者の緊急連絡先で、ここを英語化すると実通話が壊れる。詳細は `doc/plan.md` 4a 章「言語方針」。 |
 
 ## 3. 環境（ホスト・ビルド・デプロイ）
 
@@ -99,6 +100,8 @@ ssh beacon-host '"$HOME/Library/Android/sdk/platform-tools/adb" -s RFGL41GKP0Z l
   この 3 つが揃ったらコードを触らずに掛け直す。直らないときの次の容疑は `input_audio_buffer.speech_started` ごとの Twilio `clear`（`voice.ts`）による自己割り込みだが、上記の事件では相手が無言の区間でも聞こえていなかったためこれでは説明できなかった。
 - `sanitizeLocationForPersistence()` は名前に反して **`accuracy_m` は意図的に残す**（位置を明かさない数値のため）。消すのは緯度・経度と番地レベルの住所だけ。
 - **Compose の `LazyColumn` を親の `verticalScroll` の中に置くときは `heightIn(max = ...)` を付ける**。無制限だとクラッシュし、`height` 固定だと発言が少ないときに大きな空白が残る（P1-16 で実際に踏んだ）。
+- **`targetSdk 36` は強制 edge-to-edge**。自前の `topBar` に `Modifier.statusBarsPadding()` を付けないとロゴがステータスバーに重なる。
+- **`lightColorScheme` は使うロールを全て明示する**。`tertiaryContainer` を省くと M3 既定のピンクが入り、ライブフィードの吹き出しが全部ピンクに見える。
 - **ライブフィードは「自分が owner の最新イベント 1 件」だけを表示する**。画面ボタン発信も Beacon 発信も同じ経路で拾えるが、過去イベントの選択 UI はない。実機検証で transcript が見たいときは新しい実通話を 1 回行う必要がある。
 
 ## 6. 既知のギャップ（バグではなく、把握済みの未対応）

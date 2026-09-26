@@ -10,8 +10,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 enum class AdvertisementKind(val label: String) {
-    IBEACON("iBeacon（＋Beacon ボタン候補）"),
-    GATT_SERVICE("GATT（XIAO nRF52840）"),
+    IBEACON("iBeacon (+Beacon button candidate)"),
+    GATT_SERVICE("GATT (XIAO nRF52840)"),
 }
 
 enum class TriggerTransport(val label: String) {
@@ -87,7 +87,7 @@ object AdvertisementRegistry {
         lastLinkedPacketAtMillis = packetAtMillis
         val gapMs = packetAtMillis - previous
         if (previous != 0L && gapMs >= RECEPTION_GAP_LOG_MS) {
-            appendBeaconLog("受信再開: ${"%.1f".format(gapMs / 1000.0)}秒ぶり ${screenState(context)}")
+            appendBeaconLog("Scan resumed after ${"%.1f".format(gapMs / 1000.0)}s ${screenState(context)}")
         }
     }
 
@@ -115,7 +115,7 @@ object AdvertisementRegistry {
     fun screenState(context: Context): String {
         val interactive = context.getSystemService(PowerManager::class.java)?.isInteractive
         val locked = context.getSystemService(KeyguardManager::class.java)?.isKeyguardLocked
-        return "画面=${if (interactive == true) "ON" else "OFF"} ロック=${if (locked == true) "中" else "解除"}"
+        return "screen=${if (interactive == true) "ON" else "OFF"} lock=${if (locked == true) "locked" else "unlocked"}"
     }
 
     @Synchronized
@@ -149,17 +149,17 @@ object AdvertisementRegistry {
         val slot = observation.beaconSlot ?: return
         val address = observation.deviceAddress ?: return
         val state = slot.label +
-            (if (observation.beaconLongPress == true) " (長押し)" else "") +
-            if (observation.beaconBatteryLow == true) " (電池低下)" else ""
+            (if (observation.beaconLongPress == true) " (long press)" else "") +
+            if (observation.beaconBatteryLow == true) " (battery low)" else ""
         val previous = lastIBeaconStateByAddress.put(address, state)
         if (previous == state) return
         val timing = "pkt=${formatLogTime(packetWallMillis(result))} " +
-            "遅延=${packetAgeMillis(result)}ms RSSI=${result.rssi} ${screenState(context)}"
+            "delay=${packetAgeMillis(result)}ms RSSI=${result.rssi} ${screenState(context)}"
         appendBeaconLog(
             if (previous == null) {
-                "[${deviceLabel(address)}] 初回: $state / $timing"
+                "[${deviceLabel(address)}] first: $state / $timing"
             } else {
-                "[${deviceLabel(address)}] 変化: $previous → $state / $timing"
+                "[${deviceLabel(address)}] change: $previous -> $state / $timing"
             },
         )
     }
@@ -174,7 +174,7 @@ object AdvertisementRegistry {
                 key = "ibeacon:${deviceAddress.orEmpty()}",
                 kind = AdvertisementKind.IBEACON,
                 title = "iBeacon • $label",
-                detail = "現在: ${iBeacon.slot.label}",
+                detail = "Current: ${iBeacon.slot.label}",
                 rssi = result.rssi,
                 lastSeenAtMillis = now,
                 seenCount = 0,
@@ -193,7 +193,7 @@ object AdvertisementRegistry {
                 key = "gatt:${deviceAddress.orEmpty()}",
                 kind = AdvertisementKind.GATT_SERVICE,
                 title = "$name • $label",
-                detail = "$XIAO_MODEL_INFO\nService: ${serviceUuid ?: "未広告"}",
+                detail = "$XIAO_MODEL_INFO\nService: ${serviceUuid ?: "not advertised"}",
                 rssi = result.rssi,
                 lastSeenAtMillis = now,
                 seenCount = 0,

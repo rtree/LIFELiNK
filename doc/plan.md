@@ -246,6 +246,17 @@ emergency_events/{event_id}/updates/discord_{interaction_id}:   # 返信（inter
 
 UI 全体の完成形を先に見る価値はあるが、電話と iBeacon の実機検証を先に終える。Discord 個別 DM はその直後に先行検証し、録音や LIFELiNK 同士の共有 UI は後続とする。
 
+### Android 画面構成と言語方針（P1-17、2026-09-26 決定・実装済み）
+
+- 検証用の 1 スクロール画面をやめ、**Home / Members / Settings の 3 タブ**にした（モックのタブ行に合わせた）。`MainActivity` は状態を 1 箇所に持ったまま `when (tab)` で表示を切り替える方式で、発信ロジック・Safety gate・Beacon 監視には一切手を入れていない。
+  - **Home**: 準備状況チェックリスト（サインイン／World ID／緊急連絡先／ボタンのリンク／見守り稼働）、SOS ボタン（2 回タップ確定）、状況メモ、通話中の AI へのメモ送信、ライブフィード。
+  - **Members**: 電話の緊急連絡先と Discord メンバー（招待・テスト DM・解除）。
+  - **Settings**: アカウント、World ID、位置情報、物理ボタン（リンク・見守り・電池最適化・送信時間）、Diagnostics（Beacon ログ）、Backend URL。
+- テーマは `Theme.kt` / `Color.kt`（モック由来: primary=ネイビー `#0E2A55`、error=緊急レッド `#E23B32`、background=`#F2F6FD`、ボタンは pill 形状）。`lightColorScheme` は `tertiaryContainer` と `surfaceContainer*` まで明示する（未指定だと M3 の既定ピンクが出てフィードの吹き出しが全部ピンクになる）。
+- `targetSdk 36` は強制 edge-to-edge のため、自前の `topBar` には `Modifier.statusBarsPadding()` が必須（付け忘れるとロゴがステータスバーに重なる）。
+- **言語方針**: アプリ UI は英語。**AI が電話で話す日本語（`voice.ts` の `buildInitialMessage` / `instructions` / `injectEmergencyUpdate`、`server.ts` の AI 注入文）は日本語のまま維持する**（受け手は日本語話者の緊急連絡先であり、ここを英語にすると実通話が壊れる）。Discord の DM 本文・招待ページ・ボタンラベルも当面日本語のまま（受け手は日本語話者の友人）。フィードに出る `author_name` と通話終了の `system` 本文だけ英語化した（Cloud Run rev `00027-g5z`）。
+- 文言は Kotlin 内のリテラルのまま。`values/strings.xml` への抽出は多言語対応が必要になった時点で行う（ハッカソン中は着手しない）。
+
 ## 5. システム構成
 
 ```mermaid

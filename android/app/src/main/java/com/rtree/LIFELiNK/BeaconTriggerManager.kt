@@ -56,12 +56,12 @@ object BeaconTriggerManager {
                 pendingIntent(context),
             )
             AdvertisementRegistry.appendBeaconLog(
-                "スキャン開始: PendingIntent LOW_LATENCY filter=${filters.size} result=$result " +
-                    "リンクスロット=${linkedSlots(context).joinToString { it.label }}",
+                "Scan started: PendingIntent LOW_LATENCY filter=${filters.size} result=$result " +
+                    "linkedSlots=${linkedSlots(context).joinToString { it.label }}",
             )
         } else {
             scanner.stopScan(pendingIntent(context))
-            AdvertisementRegistry.appendBeaconLog("スキャン開始: リンク済みBeaconが無いため発信トリガーは無効（観測のみ）")
+            AdvertisementRegistry.appendBeaconLog("Scan started: no linked Beacon, alert trigger disabled (observation only)")
         }
         startForegroundCallback(context, scanner)
         return filters.size
@@ -99,7 +99,7 @@ object BeaconTriggerManager {
             }
 
             override fun onScanFailed(errorCode: Int) {
-                AdvertisementRegistry.appendBeaconLog("前面スキャン失敗: errorCode=$errorCode")
+                AdvertisementRegistry.appendBeaconLog("Foreground scan failed: errorCode=$errorCode")
             }
         }
         foregroundScanner = scanner
@@ -173,8 +173,8 @@ class BeaconReceiver : BroadcastReceiver() {
         }
         if (fresh.isEmpty()) {
             AdvertisementRegistry.appendBeaconLog(
-                "破棄(古い) [$path] 最新遅延=${matched.minOf(AdvertisementRegistry::packetAgeMillis)}ms " +
-                    "件数=${matched.size} ${AdvertisementRegistry.screenState(context)}",
+                "Dropped (stale) [$path] newestDelay=${matched.minOf(AdvertisementRegistry::packetAgeMillis)}ms " +
+                    "count=${matched.size} ${AdvertisementRegistry.screenState(context)}",
             )
             return
         }
@@ -220,19 +220,19 @@ class BeaconReceiver : BroadcastReceiver() {
         val packetAt = AdvertisementRegistry.packetWallMillis(packet)
         val identity = AdvertisementRegistry.parseIBeacon(packet)
         AdvertisementRegistry.appendBeaconLog(
-            "押下受理($reason) [$path] [${AdvertisementRegistry.deviceLabel(runCatching { packet.device.address }.getOrNull())}] " +
+            "Press accepted($reason) [$path] [${AdvertisementRegistry.deviceLabel(runCatching { packet.device.address }.getOrNull())}] " +
                 "${identity?.slot?.label} pkt=${formatLogTime(packetAt)} " +
-                "受信遅延=${AdvertisementRegistry.packetAgeMillis(packet)}ms RSSI=${packet.rssi} " +
+                "delay=${AdvertisementRegistry.packetAgeMillis(packet)}ms RSSI=${packet.rssi} " +
                 AdvertisementRegistry.screenState(context),
         )
         val preferences = EmergencyPreferences(context)
         if (preferences.beaconDryRun) {
-            AdvertisementRegistry.appendBeaconLog("ドライラン: 発信せず（本番ならここでAPI送信）")
+            AdvertisementRegistry.appendBeaconLog("Dry run: not sending (production would call the API here)")
             return
         }
         val contactId = preferences.contactId
         if (contactId == null) {
-            AdvertisementRegistry.appendBeaconLog("発信中止: 緊急連絡先が未登録")
+            AdvertisementRegistry.appendBeaconLog("Alert aborted: no emergency contact registered")
             return
         }
         val apiClient = LifeLinkApiClient()
@@ -243,7 +243,7 @@ class BeaconReceiver : BroadcastReceiver() {
                 apiClient.getEmergencyEvent(attempt.eventId)
             }.getOrNull()
             if (existing?.state !in TERMINAL_EVENT_STATES) {
-                AdvertisementRegistry.appendBeaconLog("発信中止: 進行中のイベントあり state=${existing?.state}")
+                AdvertisementRegistry.appendBeaconLog("Alert aborted: event already in progress state=${existing?.state}")
                 return
             }
             safetyGate.clear(attempt.eventId)
@@ -251,7 +251,7 @@ class BeaconReceiver : BroadcastReceiver() {
         }
 
         val requestStartedAt = System.currentTimeMillis()
-        AdvertisementRegistry.appendBeaconLog("API送信開始 (押下パケットから${requestStartedAt - packetAt}ms)")
+        AdvertisementRegistry.appendBeaconLog("API request started (${requestStartedAt - packetAt}ms after press packet)")
         runCatching {
             apiClient.createEmergencyEvent(
                 eventId = attempt.eventId,
@@ -263,7 +263,7 @@ class BeaconReceiver : BroadcastReceiver() {
         }.onSuccess { result ->
             val now = System.currentTimeMillis()
             AdvertisementRegistry.appendBeaconLog(
-                "API応答 state=${result.state} API所要=${now - requestStartedAt}ms 押下パケットから${now - packetAt}ms",
+                "API response state=${result.state} apiTook=${now - requestStartedAt}ms ${now - packetAt}ms after press packet",
             )
         }.onFailure { error ->
             if (error is ApiException && error.statusCode in 400..499) {
@@ -271,7 +271,7 @@ class BeaconReceiver : BroadcastReceiver() {
             }
             val errorCode = (error as? ApiException)?.errorCode ?: error::class.simpleName
             AdvertisementRegistry.appendBeaconLog(
-                "API失敗 $errorCode API所要=${System.currentTimeMillis() - requestStartedAt}ms",
+                "API failed $errorCode apiTook=${System.currentTimeMillis() - requestStartedAt}ms",
             )
         }
     }

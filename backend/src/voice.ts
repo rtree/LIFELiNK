@@ -329,7 +329,7 @@ export function registerMediaBridge(
         },
         "Twilio Media Stream closed",
       );
-      if (emergencyEventId) onTranscript(emergencyEventId, "system", "通話が終了しました");
+      if (emergencyEventId) onTranscript(emergencyEventId, "system", "Call ended");
       closeBoth();
     });
     openAiSocket.on("close", (code, reason) => {

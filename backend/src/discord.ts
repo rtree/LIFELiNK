@@ -455,7 +455,8 @@ export function relayCallTranscript(
         type: speaker === "contact" ? "transcript_contact" : speaker === "ai" ? "transcript_ai" : "system",
         author_type: speaker,
         author_uid: null,
-        author_name: speaker === "contact" ? "電話の相手" : speaker === "ai" ? "LIFELiNK AI" : "システム",
+        author_name:
+          speaker === "contact" ? "Emergency contact" : speaker === "ai" ? "LIFELiNK AI" : "System",
         text,
         payload: null,
         created_at: FieldValue.serverTimestamp(),
