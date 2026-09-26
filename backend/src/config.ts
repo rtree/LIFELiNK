@@ -24,6 +24,13 @@ const configSchema = z.object({
   WORLD_ID_ACTION: z.string().min(1).default("verify-emergency-caller"),
   WORLD_ID_ENVIRONMENT: z.enum(["production", "staging"]).default("production"),
   WORLD_ID_RP_SIGNING_KEY: trimmedSecret(z.string().min(1)).optional(),
+  DISCORD_APPLICATION_ID: z.string().regex(/^\d+$/).default("1553217776179486882"),
+  DISCORD_PUBLIC_KEY: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/)
+    .default("ed97e6765b57e5d377a2b41ed10af9df0a5fe0f8acb955d63a6a118525dfdb84"),
+  DISCORD_BOT_TOKEN: trimmedSecret(z.string().min(1)).optional(),
+  DISCORD_CLIENT_SECRET: trimmedSecret(z.string().min(1)).optional(),
 });
 
 export const config = configSchema.parse(process.env);

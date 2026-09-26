@@ -43,6 +43,17 @@ service cloud.firestore {
         allow read: if isOwner(uid);
         allow write: if false;
       }
+
+      // users/{uid}/discordContacts/{discord_user_id} (doc/plan.md P0-16)
+      match /discordContacts/{discordUserId} {
+        allow read: if isOwner(uid);
+        allow write: if false;
+      }
+
+      // users/{uid}/discordInvites/{invite_id}: holds token hashes, backend only.
+      match /discordInvites/{inviteId} {
+        allow read, write: if false;
+      }
     }
 
     // friend_links/{link_id}, doc id = min(uidA, uidB) + "_" + max(uidA, uidB)
@@ -64,6 +75,13 @@ service cloud.firestore {
         allow read: if isSignedIn() &&
           (request.auth.uid == get(/databases/$(database)/documents/emergency_events/$(eventId)).data.uid ||
            request.auth.uid in get(/databases/$(database)/documents/emergency_events/$(eventId)).data.participant_uids);
+        allow write: if false;
+      }
+
+      // emergency_events/{emergency_event_id}/discord_notifications/{discord_user_id}
+      match /discord_notifications/{discordUserId} {
+        allow read: if isSignedIn() &&
+          request.auth.uid == get(/databases/$(database)/documents/emergency_events/$(eventId)).data.uid;
         allow write: if false;
       }
     }

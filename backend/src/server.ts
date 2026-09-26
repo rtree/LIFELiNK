@@ -9,6 +9,7 @@ import { z } from "zod";
 
 import { authenticate, requireHumanVerification } from "./auth.js";
 import { config } from "./config.js";
+import { notifyDiscordContacts, registerDiscordRoutes } from "./discord.js";
 import {
   injectEmergencyUpdate,
   isValidTwilioRequest,
@@ -47,6 +48,7 @@ await app.register(formbody);
 await app.register(websocket);
 
 registerWorldIdRoutes(app, db);
+registerDiscordRoutes(app, db);
 
 registerMediaBridge(app, async (eventId, callSid) => {
   const eventRef = db.collection("emergency_events").doc(eventId);
@@ -294,6 +296,14 @@ app.post(
     }
 
     if (result.outcome === "created") {
+      const snapshot = parsed.data.location_snapshot;
+      void notifyDiscordContacts(db, app.log, {
+        eventId: parsed.data.emergency_event_id,
+        ownerUid: request.user.uid,
+        prefecture: snapshot?.address ?? null,
+        capturedAt: snapshot?.captured_at ?? null,
+        note: parsed.data.initial_note ?? null,
+      }).catch((error) => app.log.error({ error }, "Discord notification failed"));
       try {
         const callSid = await placeEmergencyCall(
           parsed.data.emergency_event_id,

@@ -64,6 +64,14 @@ data class WorldIdFlowStatus(
     val error: String?,
 )
 
+data class DiscordContact(
+    val id: String,
+    val displayName: String,
+    val testStatus: String?,
+    val testErrorCode: Int?,
+    val testAcknowledged: Boolean,
+)
+
 class ApiException(
     val statusCode: Int,
     val errorCode: String,
@@ -154,6 +162,32 @@ class LifeLinkApiClient(
             state = response.getString("state"),
             error = response.optString("error").takeIf(String::isNotBlank),
         )
+    }
+
+    suspend fun createDiscordInvite(): String =
+        post("/v1/discord/invites", JSONObject()).getString("invite_url")
+
+    suspend fun listDiscordContacts(): List<DiscordContact> {
+        val contacts = request("GET", "/v1/discord/contacts").getJSONArray("contacts")
+        return (0 until contacts.length()).map { index ->
+            val contact = contacts.getJSONObject(index)
+            val test = contact.optJSONObject("last_test_dm")
+            DiscordContact(
+                id = contact.getString("id"),
+                displayName = contact.getString("display_name"),
+                testStatus = test?.getString("status"),
+                testErrorCode = test?.takeUnless { it.isNull("error_code") }?.optInt("error_code"),
+                testAcknowledged = test?.optBoolean("acknowledged") == true,
+            )
+        }
+    }
+
+    suspend fun sendDiscordTest(contactId: String) {
+        post("/v1/discord/contacts/$contactId/test", JSONObject())
+    }
+
+    suspend fun revokeDiscordContact(contactId: String) {
+        request("DELETE", "/v1/discord/contacts/$contactId")
     }
 
     private suspend fun post(path: String, body: JSONObject): JSONObject {

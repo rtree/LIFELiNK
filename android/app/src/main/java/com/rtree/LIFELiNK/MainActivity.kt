@@ -329,6 +329,7 @@ private fun SetupScreen() {
         ) {
             Text("緊急連絡先を登録")
         }
+        DiscordContactsSection(apiClient = apiClient)
         OutlinedTextField(
             modifier = Modifier.fillMaxWidth(),
             value = initialNote,
@@ -562,6 +563,100 @@ private fun SetupScreen() {
         )
         Spacer(Modifier.height(12.dp))
         Text("Backend: ${BuildConfig.BACKEND_URL}", style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+@Composable
+private fun DiscordContactsSection(apiClient: LifeLinkApiClient) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var contacts by remember { mutableStateOf<List<DiscordContact>>(emptyList()) }
+    var statusText by remember { mutableStateOf("追加の連絡手段：Discord の DM でも知らせます") }
+
+    suspend fun refresh() {
+        runCatching { apiClient.listDiscordContacts() }
+            .onSuccess { contacts = it }
+            .onFailure { statusText = "Discord 連絡先の取得失敗: ${it.userMessage()}" }
+    }
+
+    LaunchedEffect(Unit) {
+        if (FirebaseAuth.getInstance().currentUser != null) refresh()
+    }
+
+    HorizontalDivider()
+    Text("Discord の緊急連絡先", style = MaterialTheme.typography.titleLarge)
+    Text(statusText, style = MaterialTheme.typography.bodySmall)
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Button(
+            modifier = Modifier.weight(1f),
+            onClick = {
+                scope.launch {
+                    runCatching { apiClient.createDiscordInvite() }
+                        .onSuccess { url ->
+                            statusText = "招待 URL を作成しました（24 時間有効・1 回限り）。相手に送ってください"
+                            context.startActivity(
+                                Intent.createChooser(
+                                    Intent(Intent.ACTION_SEND)
+                                        .setType("text/plain")
+                                        .putExtra(Intent.EXTRA_TEXT, "LIFELiNK の緊急連絡先への招待です：$url"),
+                                    "招待 URL を共有",
+                                ),
+                            )
+                        }
+                        .onFailure { statusText = "招待の作成に失敗: ${it.userMessage()}" }
+                }
+            },
+        ) {
+            Text("招待を作成")
+        }
+        Button(modifier = Modifier.weight(1f), onClick = { scope.launch { refresh() } }) {
+            Text("更新")
+        }
+    }
+    if (contacts.isEmpty()) {
+        Text("承認済みの Discord 連絡先はまだいません", style = MaterialTheme.typography.bodySmall)
+    }
+    contacts.forEach { contact ->
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(contact.displayName, style = MaterialTheme.typography.titleMedium)
+                Text(
+                    when {
+                        contact.testStatus == null -> "テスト DM 未送信"
+                        contact.testStatus == "failed" -> "テスト DM 送信失敗（Discord エラー ${contact.testErrorCode ?: "不明"}）"
+                        contact.testAcknowledged -> "テスト DM 到達確認済み"
+                        else -> "テスト DM 送信済み（相手の確認待ち）"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            scope.launch {
+                                statusText = runCatching { apiClient.sendDiscordTest(contact.id) }
+                                    .fold({ "${contact.displayName} にテスト DM を送りました" }, { "テスト DM 失敗: ${it.userMessage()}" })
+                                refresh()
+                            }
+                        },
+                    ) {
+                        Text("テスト DM")
+                    }
+                    Button(
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            scope.launch {
+                                statusText = runCatching { apiClient.revokeDiscordContact(contact.id) }
+                                    .fold({ "${contact.displayName} を解除しました" }, { "解除失敗: ${it.userMessage()}" })
+                                refresh()
+                            }
+                        },
+                    ) {
+                        Text("解除")
+                    }
+                }
+            }
+        }
     }
 }
 
