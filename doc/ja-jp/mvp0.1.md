@@ -4,7 +4,7 @@
 
 > 物理ボタン（＋Beacon）または画面ボタン → Android Safety gate → Cloud Run → Twilio が登録先へ電話 → OpenAI Realtime の AI が現在地（都道府県）とメモを伝えて会話 → 同時に Discord Bot が同意済み友人へ DM → 通話の書き起こし（相手/AI）を DM に逐次中継 → 友人が「状況を返信」を何度でも送信 → 返信が同じイベントに保存され、通話中の AI が相手に伝える。
 
-**このスナップショット以降の変更**: 2026-09-26 に `emergency_events` へ `participant_uids`（常に空配列）と `trigger_source`（`ble` のとき既定 `beacon`）を書く修正を入れ、revision `lifelink-backend-00026-g6n` をデプロイした（`doc/plan.md` 6 章・`firestore.rules` が前提にしていたフィールドが未書き込みだったため）。動作条件は本ファイルのまま。
+**このスナップショット以降の変更**: 2026-09-26 に `emergency_events` へ `participant_uids`（常に空配列）と `trigger_source`（`ble` のとき既定 `beacon`）を書く修正を入れ、revision `lifelink-backend-00026-g6n` をデプロイした（`doc/ja-jp/plan.md` 6 章・`firestore.rules` が前提にしていたフィールドが未書き込みだったため）。動作条件は本ファイルのまま。
 
 ## 1. 固定点（この組み合わせで動作確認済み）
 
@@ -50,7 +50,7 @@ Cloud Run の参照は `:latest`。すべて version 1 が最新なので、こ�
   - OAuth2 Redirects: `https://lifelink-backend-1023311564471.asia-northeast1.run.app/v1/discord/oauth/callback`（Portal で手動設定。Bot token からは変更不可）
   - Interactions Endpoint URL: `https://lifelink-backend-1023311564471.asia-northeast1.run.app/v1/discord/interactions`（Bot token で `PATCH /applications/@me` して設定。Discord の署名付き PING 検証に通過）
   - Bot をテスト用サーバーへ追加済み: `https://discord.com/oauth2/authorize?client_id=1553217776179486882&scope=bot&permissions=0&integration_type=0`。**受信者も同じサーバーにいないと DM は `50278` で失敗する**
-- **＋Beacon（PB-BTN-01）**: メーカーアプリで RUNNING・ボタン検知モード・間隔 1 秒・**送信時間 60 秒**・TxPower 0 dBm。詳細は `reference/beacon-verification.md`。
+- **＋Beacon（PB-BTN-01）**: メーカーアプリで RUNNING・ボタン検知モード・間隔 1 秒・**送信時間 60 秒**・TxPower 0 dBm。詳細は `doc/ja-jp/beacon-verification.md`。
 
 ## 3. Firestore のデータ（本物のスキーマ）
 
@@ -68,7 +68,7 @@ Cloud Run の参照は `:latest`。すべて version 1 が最新なので、こ�
 | `emergency_events/{id}/discord_notifications/{discord_user_id}` | DM の宛先スナップショット兼配送状態（`owner_uid`、`status: pending/sent/failed`、`channel_id`、`message_id`、`error_code`） |
 | `world_id_nullifiers/…` | World ID の再利用防止 |
 
-書き込みはすべて backend（Admin SDK）経由。クライアント書き込みは rules で全面拒否。スキーマの正本は `doc/plan.md`（6・6a 章と「P0-16 凍結スキーマ・API」）。
+書き込みはすべて backend（Admin SDK）経由。クライアント書き込みは rules で全面拒否。スキーマの正本は `doc/ja-jp/plan.md`（6・6a 章と「P0-16 凍結スキーマ・API」）。
 
 ## 4. ゼロから再現する手順
 
@@ -90,7 +90,7 @@ Cloud Run の参照は `:latest`。すべて version 1 が最新なので、こ�
    export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
    export ANDROID_HOME="$HOME/Library/Android/sdk"
    ./gradlew assembleDebug
-   # 端末は beacon-host 経由（doc/host-setup.md）
+   # 端末は beacon-host 経由（doc/ja-jp/host-setup.md）
    scp app/build/outputs/apk/debug/app-debug.apk beacon-host:/tmp/lifelink-debug.apk
    ssh beacon-host '"$HOME/Library/Android/sdk/platform-tools/adb" -s <serial> install -r /tmp/lifelink-debug.apk'
    ```
@@ -107,7 +107,7 @@ Cloud Run の参照は `:latest`。すべて version 1 が最新なので、こ�
 - [ ] 友人が「状況を返信」「続けて返信」で複数回返信でき、通話中の AI がそのたびに伝える
 - [ ] Firestore の `emergency_events/{id}` に `updates`（note/transcript_*/friend_comment/system）と `discord_notifications`（`sent`）が残る
 
-調査用コマンド（イベント、Twilio 状態）は `doc/plan.md` と会話ログの手順を参照。Twilio の通話状態は Secret を環境変数に読み込んで `GET /2010-04-01/Accounts/{sid}/Calls/{CallSid}.json`（値は表示しない）。
+調査用コマンド（イベント、Twilio 状態）は `doc/ja-jp/plan.md` と会話ログの手順を参照。Twilio の通話状態は Secret を環境変数に読み込んで `GET /2010-04-01/Accounts/{sid}/Calls/{CallSid}.json`（値は表示しない）。
 
 ## 6. この時点の既知の制約（リファクタリング時に注意）
 
@@ -115,7 +115,7 @@ Cloud Run の参照は `:latest`。すべて version 1 が最新なので、こ�
 - Android は 1 画面（`MainActivity.kt`）に全機能が載った検証用 UI。フル UI（`doc/uimock/`、4a 章）は未着手。
 - データは P0 の `emergency_events`/`updates`。P2 の `emergencySessions`/`facts`/`timeline`（8a 章）へは未移行。
 - Beacon のリンク情報・ドライラン・送信時間設定は端末ローカル（`SharedPreferences`）。アカウント同期は未実装。
-- APK 更新で見守りサービスが止まる。画面 OFF 中は BLE の受信が間引かれる（`reference/beacon-verification.md`）。
+- APK 更新で見守りサービスが止まる。画面 OFF 中は BLE の受信が間引かれる（`doc/ja-jp/beacon-verification.md`）。
 - 電話の相手への「通話内容を友人と共有する」告知はデモのため入れていない。
 - 失敗系（権限拒否・通信断・外部 API 障害）の網羅確認は P3 に後回し。
 - GPS 座標・精度・詳細住所は保存・発話・DM しない（都道府県のみ）。
