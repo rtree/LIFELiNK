@@ -51,6 +51,9 @@ AI 待受番号は Twilio `PNbe25648b5f32bd261cb3ac9039855fd3`（番号本体は
 - **AI 指示（rev `00031-dfn`）**: carrier_conference では「3 者通話・混合音声で話者は推測（最初の声は本人、後から入った声は連絡先の可能性が高い）・
   保留などの自動アナウンスには答えない・環境音は可能性としてのみ述べる」を session instructions に追加。英語方針は変えていない。
 - Android の最初の実装は Home に「Experimental: conference SOS」ボタンを置き、コードを表示して `ACTION_DIAL`（`tel:<AI番号>,,<code>`）で標準ダイアラーを開くだけ。自作ダイアラー（P2-15）・Beacon 選択（P2-16）はこの後。
+- **Beacon の SOS 方式（2026-09-26 人間決定、P2-16）**: Settings で `SOSV1-nope`（従来の backend→連絡先）と `SOSV2-ambientMode`（キャリア会議）を選ぶ。
+  **既定は SOSV2-ambientMode**（当初案の「既定は既存」を人間判断で変更）。端末ローカル設定（`beacon_sos_mode`）。
+  LIFELiNK が既定の電話アプリでない、または `CALL_PHONE` が無いときは、Beacon は自動で SOSV1 を使う（無発信を避ける）。
 
 ## 1. プロダクトのゴール
 

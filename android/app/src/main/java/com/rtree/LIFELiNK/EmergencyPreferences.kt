@@ -55,6 +55,12 @@ class EmergencyPreferences(context: Context) {
             preferences.edit().putBoolean(BEACON_DRY_RUN, value).apply()
         }
 
+    var beaconSosMode: String
+        get() = preferences.getString(BEACON_SOS_MODE, SOS_V2_AMBIENT) ?: SOS_V2_AMBIENT
+        set(value) {
+            preferences.edit().putString(BEACON_SOS_MODE, value).apply()
+        }
+
     // Must match the maker app's advertising duration (10s or 60s) on the physical button.
     var beaconBurstSeconds: Int
         get() = preferences.getInt(BEACON_BURST_SECONDS, 60)
@@ -135,13 +141,16 @@ class EmergencyPreferences(context: Context) {
         )
     }
 
-    private companion object {
-        const val CONTACT_ID = "contact_id"
-        const val MASKED_CONTACT = "masked_contact"
-        const val LOCATION = "location"
-        const val WORLD_ID_FLOW_ID = "world_id_flow_id"
-        const val LINKED_TRIGGER_DEVICE = "linked_trigger_device"
-        const val BEACON_DRY_RUN = "beacon_dry_run"
-        const val BEACON_BURST_SECONDS = "beacon_burst_seconds"
+    companion object {
+        const val SOS_V1_NOPE = "SOSV1-nope"
+        const val SOS_V2_AMBIENT = "SOSV2-ambientMode"
+        private const val BEACON_SOS_MODE = "beacon_sos_mode"
+        private const val CONTACT_ID = "contact_id"
+        private const val MASKED_CONTACT = "masked_contact"
+        private const val LOCATION = "location"
+        private const val WORLD_ID_FLOW_ID = "world_id_flow_id"
+        private const val LINKED_TRIGGER_DEVICE = "linked_trigger_device"
+        private const val BEACON_DRY_RUN = "beacon_dry_run"
+        private const val BEACON_BURST_SECONDS = "beacon_burst_seconds"
     }
 }

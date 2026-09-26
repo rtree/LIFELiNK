@@ -102,7 +102,7 @@ P2-09〜11 は独立録音の代替案として保留し、この電話実験の
 | P2-13 | IN PROGRESS | 既存 backend に実験イベント準備と AI 番号の着信 webhook を隔離追加する（E1） | P2-12 | 2026-09-26 19:10 実装・デプロイ済み（rev `00030-j5p`、戻し先 `00029-pfg`、env `TWILIO_AI_INBOUND_NUMBER` 追加）。番号の Voice URL=`/v1/twilio/inbound`、StatusCallback=`/v1/twilio/inbound/status`。署名なし 403 を確認。Home に「Experimental: conference SOS」を追加し実機導入。残り: 実機でコード照合・旧 SOS の回帰確認 |
 | P2-14 | DONE | 標準 Samsung dialer の手動操作で AI 単独→連絡先追加→会議を確認する（E2/E3） | P2-13、同意済み実番号 | 2026-09-26 19:15 3 者通話成立（`reference/ambient-verification.md` 0.5）。rev `00031-dfn` 後の再試験で「保留中に AI が黙る・話者を推測と言う・画面 OFF でも会話継続」をユーザー確認 |
 | P2-15 | DONE | 最低限の実ダイヤラー機能（約2画面＋α）と画面の実験 SOS を実装・実機確認する（E4） | P2-14 | 2026-09-26 20:40 実機確認（ユーザー）: role 取得、ダイヤル画面からの通常発信、画面の「Start conference SOS」で AI→join 確認→連絡先→**自動統合**（IMS は元の 2 本を新しい会議通話に置き換える。応答直後は conferenceable が空なので 1 秒ごとに再試行）、AI の振る舞い及第点。発信元端末は**マイク ON・受話口・通話音量最小・通話画面を点けない**（「ほとんど聞こえない」を確認）、終了後に音量を復元。backend rev `00033-77z`（AI に通話シーケンスと Discord 閲覧を指示）、commit `3b6fdc8`。未確認: 60 秒の呼び出し打ち切り、LIFELiNK 経由の通常着信。戻し方: Settings で電話アプリを Samsung に戻す（`cmd role get-role-holders android.app.role.DIALER`）。今後の改善: 統合タイミングを backend 経由で AI に伝えると話者推定が改善する |
-| P2-16 | TODO | Settings の Beacon SOS route 選択を追加しロック起点を確認する（E5） | P2-15 | Existing 既定・実験 opt-in、開始時にルート固定。60秒広告／75秒途切れ規則と Safety gate を維持し二重発信ゼロ。中止／復旧後に旧 SOS＋Discord が動く |
+| P2-16 | IN PROGRESS | Settings の Beacon SOS route 選択を追加しロック起点を確認する（E5） | P2-15 | 2026-09-26 実装・実機導入: Settings「Button SOS mode」で `SOSV1-nope` / `SOSV2-ambientMode`（**既定 V2**、人間決定）。V2 かつ電話アプリ保持時は Beacon 押下→carrier_conference イベント→`ConferenceSosOrchestrator` を自動開始、条件未達なら V1 にフォールバック。残り: ロック中の Beacon 押下で会議 SOS が最後まで進むかの実機確認（60秒広告／75秒途切れ規則と Safety gate は変更なし） |
 
 ## P3（欠番）
 

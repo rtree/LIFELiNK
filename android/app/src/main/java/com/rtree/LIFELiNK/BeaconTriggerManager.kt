@@ -20,6 +20,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 object BeaconTriggerManager {
     const val ACTION_BEACON_RESULT = "com.rtree.LIFELiNK.BEACON_RESULT"
@@ -251,7 +252,20 @@ class BeaconReceiver : BroadcastReceiver() {
         }
 
         val requestStartedAt = System.currentTimeMillis()
-        AdvertisementRegistry.appendBeaconLog("API request started (${requestStartedAt - packetAt}ms after press packet)")
+        val wantsAmbient = preferences.beaconSosMode == EmergencyPreferences.SOS_V2_AMBIENT
+        val canConference = isDefaultPhoneApp(context) &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.CALL_PHONE) ==
+            PackageManager.PERMISSION_GRANTED
+        // V2 needs the phone app role to place and merge calls; otherwise keep the proven V1 path.
+        val mode = if (wantsAmbient && canConference) {
+            LifeLinkApiClient.MODE_CARRIER_CONFERENCE
+        } else {
+            LifeLinkApiClient.MODE_OUTBOUND
+        }
+        if (wantsAmbient && !canConference) {
+            AdvertisementRegistry.appendBeaconLog("SOSV2 needs LIFELiNK as the phone app; using SOSV1")
+        }
+        AdvertisementRegistry.appendBeaconLog("API request started mode=$mode (${requestStartedAt - packetAt}ms after press packet)")
         runCatching {
             apiClient.createEmergencyEvent(
                 eventId = attempt.eventId,
@@ -259,12 +273,29 @@ class BeaconReceiver : BroadcastReceiver() {
                 trigger = BleEmergencyTrigger,
                 location = preferences.location,
                 initialNote = null,
+                mode = mode,
             )
         }.onSuccess { result ->
             val now = System.currentTimeMillis()
             AdvertisementRegistry.appendBeaconLog(
                 "API response state=${result.state} apiTook=${now - requestStartedAt}ms ${now - packetAt}ms after press packet",
             )
+            val aiNumber = result.aiNumber
+            val joinCode = result.joinCode
+            val contactPhone = result.contactPhone
+            if (aiNumber != null && joinCode != null && contactPhone != null) {
+                val started = withContext(Dispatchers.Main) {
+                    ConferenceSosOrchestrator.start(
+                        context = context,
+                        apiClient = apiClient,
+                        eventId = result.eventId,
+                        aiNumber = aiNumber,
+                        joinCode = joinCode,
+                        contactPhone = contactPhone,
+                    )
+                }
+                AdvertisementRegistry.appendBeaconLog("SOSV2 conference ${if (started) "started" else "could not start"}")
+            }
         }.onFailure { error ->
             if (error is ApiException && error.statusCode in 400..499) {
                 safetyGate.clear(attempt.eventId)

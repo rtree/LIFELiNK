@@ -1377,6 +1377,39 @@ private fun PhoneAppSection() {
     ) {
         Text("Open the dial pad")
     }
+    BeaconSosModeSelector()
+}
+
+@Composable
+private fun BeaconSosModeSelector() {
+    val context = LocalContext.current
+    val preferences = remember { EmergencyPreferences(context) }
+    var mode by remember { mutableStateOf(preferences.beaconSosMode) }
+    Text("Button SOS mode", style = MaterialTheme.typography.titleMedium)
+    Text(
+        "SOSV1-nope: LIFELiNK calls your contact and the AI speaks for you. " +
+            "SOSV2-ambientMode: your phone quietly calls the AI and your contact and merges them, " +
+            "so they can hear what is happening around you. SOSV2 needs LIFELiNK as the phone app; " +
+            "without it the button falls back to SOSV1.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+        listOf(EmergencyPreferences.SOS_V1_NOPE, EmergencyPreferences.SOS_V2_AMBIENT).forEach { option ->
+            val selected = mode == option
+            if (selected) {
+                Button(modifier = Modifier.weight(1f), onClick = {}) { Text(option) }
+            } else {
+                OutlinedButton(
+                    modifier = Modifier.weight(1f),
+                    onClick = {
+                        preferences.beaconSosMode = option
+                        mode = option
+                    },
+                ) { Text(option) }
+            }
+        }
+    }
 }
 
 fun isDefaultPhoneApp(context: Context): Boolean =
