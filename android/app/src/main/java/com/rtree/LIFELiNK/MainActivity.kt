@@ -163,14 +163,25 @@ private fun SetupScreen() {
     val requestBluetoothPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { grants ->
-        if (grants.values.any { it }) {
-            beaconText = runCatching {
-                BeaconTriggerManager.start(context)
-                "Beacon監視中"
-            }.getOrElse { error -> "Beacon監視開始失敗: ${error.userMessage()}" }
+        if (BeaconTriggerManager.hasPermission(context)) {
+            BeaconMonitorService.start(context)
+            beaconText = if (grants[Manifest.permission.POST_NOTIFICATIONS] == false) {
+                "見守り開始（通知権限が拒否されたため常駐通知が見えません）"
+            } else {
+                "見守りを開始しました"
+            }
         } else {
             beaconText = "Bluetooth scan権限が拒否されました"
         }
+    }
+    val monitoringRunning by BeaconMonitorService.running.collectAsStateWithLifecycle()
+    var ignoringBatteryOptimizations by remember {
+        mutableStateOf(BeaconMonitorService.isIgnoringBatteryOptimizations(context))
+    }
+    val openBatterySettings = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) {
+        ignoringBatteryOptimizations = BeaconMonitorService.isIgnoringBatteryOptimizations(context)
     }
 
     suspend fun captureAndSaveLocation() {
@@ -424,30 +435,85 @@ private fun SetupScreen() {
                 onCheckedChange = { checked ->
                     emergencyPreferences.beaconDryRun = checked
                     beaconDryRun = checked
+                    if (monitoringRunning) BeaconMonitorService.start(context)
                 },
             )
         }
+        Text(
+            if (monitoringRunning) {
+                "見守り中：通知欄に「LIFELiNK 見守り中」が出ている間だけボタンを待ち受けます"
+            } else {
+                "見守り停止中：ボタンを押しても反応しません"
+            },
+            color = if (monitoringRunning) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error,
+        )
         Button(
             modifier = Modifier.fillMaxWidth(),
             enabled = contactId != null,
             onClick = {
-                if (BeaconTriggerManager.hasPermission(context)) {
-                    beaconText = runCatching {
-                        BeaconTriggerManager.start(context)
-                        "Beacon監視中"
-                    }.getOrElse { error -> "Beacon監視開始失敗: ${error.userMessage()}" }
-                } else {
-                    val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                        arrayOf(Manifest.permission.BLUETOOTH_SCAN)
-                    } else {
-                        arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
-                    }
-                    requestBluetoothPermission.launch(permissions)
+                if (monitoringRunning) {
+                    BeaconMonitorService.stop(context)
+                    beaconText = "見守りを停止しました"
+                    return@Button
                 }
+                val permissions = buildList {
+                    add(
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            Manifest.permission.BLUETOOTH_SCAN
+                        } else {
+                            Manifest.permission.ACCESS_FINE_LOCATION
+                        },
+                    )
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        add(Manifest.permission.POST_NOTIFICATIONS)
+                    }
+                }
+                requestBluetoothPermission.launch(permissions.toTypedArray())
             },
         ) {
-            Text("Beacon監視を開始")
+            Text(if (monitoringRunning) "見守りを停止" else "見守りを開始（常駐）")
         }
+        Text(
+            if (ignoringBatteryOptimizations) {
+                "バッテリー最適化: 除外済み"
+            } else {
+                "バッテリー最適化: 未除外（画面ロック中に止められる可能性があります）"
+            },
+            color = if (ignoringBatteryOptimizations) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error,
+        )
+        if (!ignoringBatteryOptimizations) {
+            Button(
+                modifier = Modifier.fillMaxWidth(),
+                onClick = {
+                    openBatterySettings.launch(
+                        Intent(
+                            android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                            Uri.parse("package:${context.packageName}"),
+                        ),
+                    )
+                },
+            ) {
+                Text("バッテリー最適化から除外する")
+            }
+        }
+        Button(
+            modifier = Modifier.fillMaxWidth(),
+            onClick = {
+                openBatterySettings.launch(
+                    Intent(
+                        android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        Uri.parse("package:${context.packageName}"),
+                    ),
+                )
+            },
+        ) {
+            Text("アプリのバッテリー設定を開く")
+        }
+        Text(
+            "Galaxy の場合: アプリ情報 > バッテリー > 「制限なし」を選択。" +
+                "さらに 設定 > バッテリー > バックグラウンド使用制限 > 「スリープしないアプリ」に LIFELiNK を追加してください。",
+            style = MaterialTheme.typography.bodySmall,
+        )
         AdvertisementLinkSection(
             observations = observedAdvertisements,
             linkedDevice = linkedTriggerDevice,
