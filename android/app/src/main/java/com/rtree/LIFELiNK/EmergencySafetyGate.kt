@@ -64,6 +64,7 @@ class EmergencySafetyGate(context: Context) {
         const val ACTIVE_CONTACT_ID = "active_contact_id"
         const val LAST_BEACON_SEEN_AT = "last_beacon_seen_at"
         const val LAST_BEACON_STATE = "last_beacon_state"
-        const val BEACON_BURST_GAP_MS = 30_000L
+        // Must exceed the button's 60s burst: screen-off delivery can gap >40s inside a single burst.
+        const val BEACON_BURST_GAP_MS = 75_000L
     }
 }

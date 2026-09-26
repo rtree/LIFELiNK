@@ -187,13 +187,11 @@ class BeaconReceiver : BroadcastReceiver() {
                 longPress = identity.longPress,
                 packetAtMillis = AdvertisementRegistry.packetWallMillis(packet),
             )
-            if (identity.longPress) {
-                Log.i(
-                    LOG_TAG,
-                    "long-press pkt path=$path age=${AdvertisementRegistry.packetAgeMillis(packet)}ms " +
-                        "rssi=${packet.rssi} event=${reason ?: "none"}",
-                )
-            }
+            Log.i(
+                LOG_TAG,
+                "linked pkt path=$path state=${identity.slot.major}${if (identity.longPress) "/long" else ""} " +
+                    "age=${AdvertisementRegistry.packetAgeMillis(packet)}ms rssi=${packet.rssi} event=${reason ?: "none"}",
+            )
             if (reason != null) pressed = packet to reason
         }
         val (packet, reason) = pressed ?: return
