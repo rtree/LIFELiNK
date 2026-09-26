@@ -73,13 +73,19 @@ MVP 主線（P0-01〜P0-21）は完了し `mvp-0.1` として保全済み。こ�
 | P1-06a | TODO | `users/{uid}` へ `nickname`/`area` フィールドを追加し、プロフィール設定画面（モック 1-5）を実装する | P1-16 | ニックネームとエリアを保存・再取得でき、エリアを住所表示や連絡先の文脈情報に利用できる |
 | P1-06b | TODO | 端末ローカルの 2 段階音声アナウンス（送信時 stage1・接続時 stage2、JP/EN/両方、Silent SOS トグル）を実装する | P0-09、P0-13（`in-progress`/`answered` を判定する Twilio status） | 送信直後に stage1 が即時発話され、Twilio status が `answered`/`in-progress` を報告した時だけ stage2 が発話される。Silent SOS 有効時は両方無音になる |
 
-## P2: 周辺音の取り込み（現行スキーマの上に実装）
+## P2: 周辺音の取り込み（現行データ基盤＋キャリア会議の段階実験）
+
+**2026-09-26 追加判断**: Galaxy＋SoftBank の手動3者通話・ロック後のマイク到達をユーザーが確認。
+次は **キャリア IMS Conference＋Twilio AI 電話レッグ**を P2-12〜16 で段階評価する（Twilio Conference ではない）。
+既存 Cloud Run / Firestore / Discord を共用し、既存 SOS は温存、Beacon の旧／実験選択は既定を旧にする案。
+詳細・証跡・復旧手順は `reference/ambient-verification.md` 0 章。**今回は文書化のみ、Twilio参加・自動制御は未実装／未検証**。
+P2-09〜11 は独立録音の代替案として保留し、この電話実験の前提にはしない。
 
 **2026-09-26 方針転換（人間判断）**: 8a 章の `emergencySessions`/`facts`/`timeline`/`delegations` への移行（旧 P2-01〜06）は
 **ハッカソンでは実装しない**と決め、PX-14〜PX-19 へ退避した。理由は 3 つ:
 
 1. やりたいこと（周辺音の取り込み）に新コレクションが要らない。既存の `emergency_events/{id}/updates` に
-   `type: "ambient"` を 1 つ追加すれば済み、ライブフィードの mapper も 1 行で対応できる。
+   独立録音を採る場合は `type: "ambient"` の追加案を検討できる。キャリア会議では既存 transcript の意味とラベルを検討する（契約は先に plan で凍結）。
 2. 旧 P2 の本体は `voice.ts` の作り替えで、そこは最も壊れやすく、提出前に再度不安定にする理由がない。
 3. 凍結したスキーマと rules/indexes はデプロイ済みで、放置しても害がない。設計済み・実装は将来、で良い。
 
@@ -87,11 +93,16 @@ MVP 主線（P0-01〜P0-21）は完了し `mvp-0.1` として保全済み。こ�
 
 | ID | 状態 | タスク | 依存 | 完了条件 |
 | --- | --- | --- | --- | --- |
-| P2-07 | IN PROGRESS | 周辺音を短いテキスト観測に変えて取り込む（生の音声は永続化しない） | 同意・法務判断 | 調査完了・実装未着手。可否と制約は `reference/ambient-verification.md` に集約。**当初の `facts.kind: ambient_observation` ではなく、既存の `emergency_events/{id}/updates` に `type: "ambient"` を追加する形へ変更**（P2-01〜06 を PX へ退避したため） |
+| P2-07 | IN PROGRESS | 利用者周辺の声・音を AI と友人へ届ける方式を評価する（音声は永続化しない） | 同意・法務判断 | 手動キャリア会議のみユーザー確認済み。次は P2-12〜16 の電話経由実験。独立録音なら `updates.type: ambient` 案。どちらも `emergencySessions` 移行は不要。詳細は `reference/ambient-verification.md` |
 | P2-08 | DONE | マイク権限とマニフェスト宣言を「事前設定」として用意する（緊急時に権限ダイアログを出さないため） | P1-17 | `RECORD_AUDIO` / `FOREGROUND_SERVICE_MICROPHONE` を宣言し、Settings から事前に許可を取れる。許可状態が画面に出る |
 | P2-09 | TODO | `microphone` 種別の FGS を実装し、**画面 OFF・ロック中に実際に非無音の PCM が取れるかを実機で測る** | P2-08 | `reference/ambient-verification.md` 5 章のチェックリストを埋める。`AudioRecord.registerAudioRecordingCallback()` で `isClientSilenced()` を常に記録し、「録れている」と「送れている」を分けて計る |
 | P2-10 | TODO | 15 秒チャンクを backend へ POST し、`gpt-4o-mini-transcribe` の結果だけを `updates.type: "ambient"` へ保存する取り込みパス | P2-09 | 無音チャンク（RMS 閾値以下）は送らない。音声バイトは Firestore ・ログ・一時ファイルのどこにも残さない。**AI への注入は間引く**（意味が変わったときだけ・最短間隔あり）。さもないと通話が実況中継になる |
 | P2-11 | TODO | 非発話音（叫び声・ガラス・アラーム）を MediaPipe + YAMNet で端末内分類する | P2-10、時間が余った場合 | 追加コスト $0 で「Screaming」「Glass」等を同じ `ambient` へ書く。音声は端末から出ない |
+| P2-12 | TODO | キャリア会議実験の基準点・使用番号・inbound 契約を確定する（E0） | 手動3者通話は確認済み、番号用途と参加者の同意 | 番号の既存設定と復旧基準を確認。mode、認可済み pending event、期限付き一回照合、CallSid、終了、混合 transcript を plan に先に凍結。旧プロジェクト番号を無断転用しない |
+| P2-13 | TODO | 既存 backend に実験イベント準備と AI 番号の着信 webhook を隔離追加する（E1） | P2-12 | 既存 outbound を勝手に発信せず実イベント／Discord を準備できる。不明着信拒否・署名／owner照合・一回 SID bind が機能し、旧 SOS の回帰なし。スケール数・DB移行は変更しない |
+| P2-14 | TODO | 標準 Samsung dialer の手動操作で AI 単独→連絡先追加→会議を確認する（E2/E3） | P2-13、同意済み実番号 | Galaxy／相手／AI の各方向・ロック後音声・同一イベントの transcript／Discord返信・終了を実確認。失敗ならここで止め、dialer 自動化へ進まない |
+| P2-15 | TODO | 最低限の実ダイアラー機能（約2画面＋α）と画面の実験 SOS を実装・実機確認する（E4） | P2-14 | role 取得／返却、番号入力／折返し、着信／通話 UI、発信・追加・統合・終了が動く。通常通話を壊さず callback で統合成功を判定。旧 Home SOS を保持 |
+| P2-16 | TODO | Settings の Beacon SOS route 選択を追加しロック起点を確認する（E5） | P2-15 | Existing 既定・実験 opt-in、開始時にルート固定。60秒広告／75秒途切れ規則と Safety gate を維持し二重発信ゼロ。中止／復旧後に旧 SOS＋Discord が動く |
 
 ## P3（欠番）
 
@@ -137,8 +148,9 @@ MVP 主線（P0-01〜P0-21）は完了し `mvp-0.1` として保全済み。こ�
 
 1. ~~**P1-16**: アプリ内チャット風ライブ表示~~ **完了（2026-09-26 15:08、実通話で確認済み）**。
 2. ~~**P1-17**: 英語化・B2C 向け UI 整形~~ **完了（2026-09-26 15:30、3 タブ化・テーマ適用・全文英語化）**。
-3. **P2-08 〜 P2-11（次の着手）**: 周辺音の取り込み。まずマイク権限を事前設定として用意し、
-   次に「画面 OFF・ロック中に本当に録れるのか」を実機で確かめる（`reference/ambient-verification.md`）。
+3. **P2-12 → P2-13 → P2-14（次の実験）**: `reference/ambient-verification.md` 0 章を読み、番号用途・inbound 契約確認から開始。
+   手動3者通話とロック後マイク到達は確認済みだが、Twilio AI はまだ未参加。まず標準 dialer で AI＋連絡先＋Discord を検証し、
+   成功後に P2-15（通話UI／画面SOS）→P2-16（Beacon旧新選択）へ。P2-08は完了、P2-09〜11の録音案は代替として保留。
 4. 並行して、実端末で縦断フローを何度も回して MVP を堅牢化する。壊れたものをその場で直し、
    見つかった問題をタスクとして本ファイルへ追加する。
 5. P1-18 → P1-19（World ID 再認証・解除、Passport/Selfie 対応）。

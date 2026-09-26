@@ -4,6 +4,28 @@
 
 > 新しいセッションで作業を再開する場合は、本文書より先に `reference/handover.md`（壊してはいけない不変条件、環境・ビルド・デプロイ・確認コマンド、既知の落とし穴）を読むこと。本文書は設計の正本であり、必要な章だけを参照すればよい。
 
+### 2026-09-26 現在の優先判断（以下の旧フェーズ記述より優先）
+
+- MVP 0.1（電話・Beacon・Discord）、P1-16/17/20 は完了。8a 章の状況ストア移行は PX-14〜19 へ延期し、ハッカソンでは実装しない。
+- **周辺音はキャリア3者会議経由を先行実験する**。Galaxy＋SoftBank の手動「追加→統合→3者相互音声→ロック後もマイク到達」はユーザー確認済み。
+  Twilio AI 参加、LIFELiNK の default dialer、自動発信／統合、Beacon のルート選択は未実装・未検証。
+- 採る構成は `ROLE_DIALER`＋`InCallService`＋`Call.conference(otherCall)` による **キャリア／IMS Conference**。
+  **Twilio Conference ではない**。Twilio は1本の AI 電話レッグ、双方向 Media Streams で既存 Realtime へ接続する。独立した `AudioRecord` は不要。
+- 既存 Cloud Run（`maxScale=1`）、Firestore `emergency_events` / `updates`、Discord Bot・DM・返信を共用する。
+  通常 SOS と現行発信番号を温存し、実験用番号は用途と所有を確認してから選ぶ。旧プロジェクト用番号を勝手に転用しない。
+- 順序: **番号／復旧基準・契約確認→隔離したイベント準備＋着信 webhook→標準 dialer で AI 単独／手動会議→
+  最低限のダイアラー約2画面＋実験 SOS→Settings の Beacon SOS route（Existing 既定／Carrier conference opt-in）**。
+  普段の着信／通話も担うため、2画面だけの見かけ上の role 対応で済ませない。
+- webhook だけでは足りない。既存イベント作成は自動 outbound するため、実験ではそれを行わず実イベント／DM を準備する経路と、
+  認証済み pending event に inbound CallSid を一度だけ紐付ける設計が必要。Caller ID だけで認可しない。
+  mixed transcript を特定話者と誤認させず、AI leg の終了と carrier 会議終了を区別する。
+- **新規スキーマ・API はまだ未凍結**。mode、期限付き一回照合、SID／状態、登録先番号の端末受渡し、混合話者ラベル、timeout／終了を
+  P2-12 で本書に先に確定してから実装する。無断の二重発信を避け、初期実験は失敗時に終了して手動で旧 SOS へ戻す。
+- 生音声を永続化しないが、電話音声はキャリア・Twilio・OpenAI へ流れる。利用者と同意済み参加者への説明、Discord 共有、
+  出力ルート／音漏れを確認する。ローカル録音案（P2-09〜11）は別の代替として保持し、電話実験の前提にしない。
+- 調査・証拠・段階ゲート・ロールバックは **`reference/ambient-verification.md` 0章**、実験タスクは **P2-12〜16**。
+  今回は文書のみ変更し、番号・クラウド・アプリの実装や設定は変更しない。
+
 ## 1. プロダクトのゴール
 
 声を出せない状況でユーザーがボタンを押すと、LIFELiNK が事前登録済みの連絡先へ AI 音声で電話し、発信前までに収集できた現在地・住所・状況を通話の最初に伝える。
@@ -39,7 +61,7 @@ API・データ構造を見直す前に、まず対応すべきユースケー�
 8. **通話・状況のライブ表示（自分のアプリ内、2026-09-26 追加）**: Discord DM への逐次中継（4a 章）とは別に、LIFELiNK アプリ自身にも通話の書き起こしと友人からの情報をチャット風（Discord チャンネル/WhatsApp 的な見た目、uimock のテイストに近い方を採用）に表示する。
    - **対応方針（2026-09-26 決定）**: 新規スキーマは不要。既存の `emergency_events/{id}/updates`（`type: note|location|transcript_contact|transcript_ai|friend_comment|system`）をそのまま時系列チャットとして Android から購読表示する。P2（`emergencySessions`/`timeline`）への移行を待たずに実装してよい（3 章の「モックを作らず本物のスキーマへ」原則に従い、購読先は本物の `emergency_events` のみ）。P2 移行後は購読先を `timeline` に切り替えるが、UI のメッセージ整形ロジック自体は流用できるよう設計する。
 9. **周辺のスピーカー・カメラによる状況蓄積（2026-09-26 追加）**: 可能な場合、周辺の音声・映像から状況を解析し、状況ストアへ蓄積して AI が通話相手や Discord の友人からの質問に答えられるようにする。
-   - **対応方針（2026-09-26 決定）**: 8a 章の `facts.kind: ambient_observation`（`value: { text, provider }`）が既にこの用途で設計済み。生の音声・画像データそのものは保存・送信せず、端末または backend で解析した後のテキスト要約だけを fact として保存する（12 章の「音声を録音しない」方針と両立する）。P2 の最小書き込みパス（P2-01/02）が前提になるため、着手は P2 実装後。
+  - **対応方針（2026-09-26 更新）**: まず音声に限定して、冒頭のキャリア会議実験（P2-12〜16）を評価する。8a の `facts.kind: ambient_observation` は延期済みの将来設計であって依存条件ではない。既存 `emergency_events` / `updates` を使い、生音声は保存しないが電話経由で外部処理へ送信される。独立録音なら `updates.type: ambient` を追加する案を先に凍結する。映像取得は今回の実験に含めない。
 10. **World ID の再認証・認証解除・Passport/Selfie 対応（2026-09-26 追加）**: 認証が切れたら設定画面から再認証でき、認証そのものを解除する操作もできる。Proof of Human に加えて Passport や Selfie Check にも対応する。
     - **対応方針（2026-09-26 決定）**: IDKit 側は `credential_types` ポリシーに `passport`/`face` 等を追加するだけで対応できる（SDK は既に対応済み）。`human_verified` custom claim の付け外しは 5 章・8a 章の 2 段階認可モデル（Google → World ID）をそのまま使い、`backend/src/worldid.ts`（Discord 実装が触っている `server.ts`/`config.ts`/`discord.ts` とは別ファイル）に再認証・解除用の小さい API を足すだけで済む。設定画面（モック 1-6 相当）を新設する。着手は⑧⑨の後（次段落の実行順序を参照）。
 
@@ -1131,7 +1153,7 @@ World ID / IDKit は延期機能ではなく、実通話前の発信認可とし
 
 1. アプリ内チャット風ライブ表示（`emergency_events/{id}/updates` を直接購読、新規スキーマなし、`doc/tasks.md` P1-16）。
 2. 英語化・B2C 向け UI 整形（専用フェーズを設けず、以後触る画面から段階的に。P1-17）。
-3. P2 最小書き込みパスの後に周辺情報蓄積（`ambient_observation`、P2-01/P2-02 → P2-07）。
+3. 周辺音の先行評価（P2-07 配下の P2-12〜16、キャリア会議＋Twilio AI）。詳細は冒頭の優先判断と `reference/ambient-verification.md`。旧 P2-01/02 の状況ストア移行は不要、ローカル録音 P2-09〜11 は代替案。
 4. World ID 再認証・解除と Passport/Selfie 対応（P1-18 → P1-19）。
 
 ### Phase X: GATT 移行（ストレッチゴール、最優先度は最低。Phase 7・P2・P3 が片付き、時間が余った場合のみ）

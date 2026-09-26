@@ -11,6 +11,7 @@
 - 次にやること: `doc/tasks.md`「次のアクション」の順。**P1-16（チャット UI）・P1-17（英語化・3 タブの B2C UI）・P1-20（SOS 連打/長押し、定期位置、電池、揺れ）は 2026-09-26 に実機確認して完了**。
 - **2026-09-26 の大きな方針転換**: 8a 章の状況ストア移行（旧 P2-01〜06）と異常系の網羅（旧 P3-01〜04）は **PX-14〜PX-23 へ退避**し、ハッカソンでは実装しない。堅牢化は実端末で縦断フローを何度も回すやり方で進める。`doc/plan.md` 8a 章は設計文書として残す。
 - **周辺音の収集（P2-07〜P2-11）は別セッションで進める**。そのセッションの入口は `reference/ambient-verification.md` の 0 章で、現在地・次の一手・コマンド・触ってはいけないファイルがそこに揃っている。周辺音の作業なら本ファイルを読んだ後そちらへ移ること。
+- **2026-09-26 追加: 手動3者通話の成功報告**。Galaxy＋SoftBank で2番号へ発信→追加→統合→3者相互音声→ロック後も Galaxy のマイクが両者へ到達、をユーザーが確認。次は **キャリア IMS 会議＋Twilio AI 電話レッグ**を P2-12〜16 で段階実験する（Twilio Conference ではない）。既存基盤と SOS を温存し、まず番号用途／着信認可の契約確認→標準 dialer の手動 AI 会議→自作通話 UI→Beacon opt-in の順。今回は文書のみ、Twilio 参加・自動制御は未検証。詳細は `reference/ambient-verification.md` 0.4〜0.11。マイク権限取得／録音 FGS はこの電話ルートの前提ではない。
 
 ## 2. 壊してはいけない不変条件
 
@@ -116,7 +117,7 @@ ssh beacon-host '"$HOME/Library/Android/sdk/platform-tools/adb" -s RFGL41GKP0Z l
 | `GET /v1/contacts` / `GET /v1/emergency-events`（一覧系） | **実装しないと決定**（P1-16）。ライブフィードは Android から Firestore を直接 read する | `doc/plan.md` 6a 章「Android ライブフィードの実装方針」 |
 | 状況ストア（`emergencySessions`/`facts`/`timeline`/`delegations`） | スキーマ凍結・rules と indexes はデプロイ済み、実装ゼロ。**ハッカソンでは実装しないと決定**し PX へ退避 | `doc/tasks.md` PX-14〜PX-19、`doc/plan.md` 8a 章 |
 | Full UI（`doc/uimock/` の 20 画面） | 3 タブ（Home/Members/Settings）まで実装。モック全 20 画面には届いていない | `doc/plan.md` 4a 章 |
-| 周辺音の取り込み | 調査完了・マイク権限の事前取得のみ実装。録音・解析は未実装。**ロック中に録れるかは未検証** | `reference/ambient-verification.md`、P2-09〜P2-11 |
+| 周辺音の取り込み | **手動キャリア3者通話・ロック後音声到達はユーザー確認済み**。Twilio AI 参加・アプリ自動統合は次の実験。独立録音は権限導線のみ実装、録音・解析・ロック中録音は未検証 | `reference/ambient-verification.md` 0章、P2-12〜16（録音代替は P2-09〜11） |
 | 英語化 | **完了**。Android・AI の発話・Discord すべて英語（残る日本語は技適番号のみ）。`values/strings.xml` 抽出は未実施 | `doc/plan.md` 4a 章 |
 | 失敗系（権限拒否・通信断・外部 API 障害）の網羅 | 未実施。PX へ退避し、実運用を回しながら直す方針へ変更 | `doc/tasks.md` PX-20〜PX-23 |
 | 通話相手への「内容を友人と共有している」告知 | デモのため意図的に入れていない | `doc/plan.md` 4a 章、製品化時に再検討 |
