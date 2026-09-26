@@ -93,11 +93,12 @@ ssh beacon-host '"$HOME/Library/Android/sdk/platform-tools/adb" -s RFGL41GKP0Z l
 - **Galaxy のバッテリー最適化から除外しないとロック中の受信が不安定**。アプリのバッテリーを「制限なし」にする。
 - **画面 OFF 中は BLE の受信が OS に間引かれる**（60 秒あたり 5〜14 パケット、空白 11〜23 秒）。送信時間 60 秒・途切れ判定 75 秒はこの実測に基づく決定であり、短くすると取りこぼす。代償として同じボタンの連打は 75 秒間 1 回として扱われる。
 - **Firestore の indexes は rules と別デプロイ**。忘れると一覧クエリが "requires an index" で落ちる。
-- **通話中に「AI の声だけ聞こえない」片方向音声が起きることがあるが、多くは一過性で backend 側の不具合ではない**。2026-09-26 14:57 の通話（`04e6fb02-…`）で相手が「あなたの声が聞こえない。私の声は聞こえてるみたい」と発言。直後 15:06 の通話（`b53d0cea-…`）はコード変更なしで正常、ロック中・ロック解除の両方で正常。切り分け方:
+- **通話中に AI の声が一時的に消えるときは「友人の返信を AI に割り込ませた瞬間」を疑う**。2026-09-26 16:07 の通話（`8111fb87-…`）で、`OpenAI Realtime error` の時刻 07:07:52.917 と Discord 友人の `friend_comment` の時刻が秒まで一致した。原因は `injectEmergencyUpdate` が発話中でも無条件に `response.create` を送り、Realtime が「既に応答が進行中」として拒否していたこと。rev `00029-pfg` で**応答が終わるまでキューして `response.done` で流す**実装にした（`doc/plan.md` 5 章に設計だけ書かれて未実装だった箇所）。同時にエラーログを `event.type` だけからエラー本体を出すように変えたので、次に起きたら `jsonPayload.openAiError` を見ること。
+- **通話開始からずっと AI の声が聞こえない片方向音声はこれと別物で、多くは一過性で backend 側の不具合ではない**。2026-09-26 14:57 の通話（`04e6fb02-…`）で相手が「あなたの声が聞こえない。私の声は聞こえてるみたい」と発言。直後 15:06 の通話（`b53d0cea-…`）はコード変更なしで正常、ロック中・ロック解除の両方で正常。切り分け方:
   1. `Twilio Media Stream closed` ログの `outputAudioFrames` が 0 でなければ backend は Twilio へ音声を送っている（失敗時も 480 あった）。
   2. `Twilio Media Stream status` の `streamError` が null なら Stream 自体は正常。
   3. `updates` に `transcript_contact` が並んでいれば相手→AI の上り方向は生きている。
-  この 3 つが揃ったらコードを触らずに掛け直す。直らないときの次の容疑は `input_audio_buffer.speech_started` ごとの Twilio `clear`（`voice.ts`）による自己割り込みだが、上記の事件では相手が無言の区間でも聞こえていなかったためこれでは説明できなかった。
+  この 3 つが揃ったらコードを触らずに掛け直す。
 - `sanitizeLocationForPersistence()` は名前に反して **`accuracy_m`・`battery_*`・`motion_*` は意図的に残す**（位置を明かさない情報のため）。消すのは緯度・経度と番地レベルの住所だけ。（履歴: 2026-09-26 のプライバシー対応で一度 `accuracy_m` も破棄していたが、行き過ぎだったため復活させた。）
 - **`getCurrentLocation()` はアプリがバックグラウンドになると完了しない**。定期取得ループをそのまま `while` で回すと、画面が消えた瞬間に `await()` で永久に止まり、前面に戻しても再開しない（実際に踏んで 1 回しか送られなかった）。`repeatOnLifecycle(STARTED)` で囲い、`withTimeoutOrNull` で時間を切ること。
 - **Compose の `LazyColumn` を親の `verticalScroll` の中に置くときは `heightIn(max = ...)` を付ける**。無制限だとクラッシュし、`height` 固定だと発言が少ないときに大きな空白が残る（P1-16 で実際に踏んだ）。

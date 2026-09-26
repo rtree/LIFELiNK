@@ -31,17 +31,26 @@ type TwilioMediaMessage = {
   media: { payload: string };
 };
 
-const activeRealtimeSessions = new Map<string, WebSocket>();
+// Realtime rejects `response.create` while a response is already in flight, and
+// the rejected turn leaves the caller hearing nothing. Injections are therefore
+// queued and released on `response.done`.
+type RealtimeSession = {
+  socket: WebSocket;
+  responseActive: boolean;
+  pending: string[];
+};
 
-export function injectEmergencyUpdate(
-  emergencyEventId: string,
-  text: string,
-): boolean {
-  const socket = activeRealtimeSessions.get(emergencyEventId);
-  if (!socket || socket.readyState !== WebSocket.OPEN) {
-    return false;
+const activeRealtimeSessions = new Map<string, RealtimeSession>();
+
+function flushPendingInjections(session: RealtimeSession): void {
+  if (session.responseActive || session.socket.readyState !== WebSocket.OPEN) {
+    return;
   }
-  socket.send(
+  const text = session.pending.shift();
+  if (text === undefined) {
+    return;
+  }
+  session.socket.send(
     JSON.stringify({
       type: "conversation.item.create",
       item: {
@@ -56,7 +65,20 @@ export function injectEmergencyUpdate(
       },
     }),
   );
-  socket.send(JSON.stringify({ type: "response.create" }));
+  session.socket.send(JSON.stringify({ type: "response.create" }));
+  session.responseActive = true;
+}
+
+export function injectEmergencyUpdate(
+  emergencyEventId: string,
+  text: string,
+): boolean {
+  const session = activeRealtimeSessions.get(emergencyEventId);
+  if (!session || session.socket.readyState !== WebSocket.OPEN) {
+    return false;
+  }
+  session.pending.push(text);
+  flushPendingInjections(session);
   return true;
 }
 
@@ -188,6 +210,11 @@ export function registerMediaBridge(
     let streamSid: string | null = null;
     let emergencyEventId: string | null = null;
     let pendingInitialMessage: string | null = null;
+    const session: RealtimeSession = {
+      socket: openAiSocket,
+      responseActive: false,
+      pending: [],
+    };
     const pendingInputAudio: string[] = [];
     let inboundAudioFrames = 0;
     let outputAudioFrames = 0;
@@ -208,6 +235,7 @@ export function registerMediaBridge(
         }),
       );
       openAiSocket.send(JSON.stringify({ type: "response.create" }));
+      session.responseActive = true;
       pendingInitialMessage = null;
     };
 
@@ -239,7 +267,7 @@ export function registerMediaBridge(
         }),
       );
       if (emergencyEventId) {
-        activeRealtimeSessions.set(emergencyEventId, openAiSocket);
+        activeRealtimeSessions.set(emergencyEventId, session);
       }
       pendingInputAudio.splice(0).forEach((audio) => {
         openAiSocket.send(
@@ -279,7 +307,7 @@ export function registerMediaBridge(
         const initialMessage = buildInitialMessage(context);
         pendingInitialMessage = `Read the following out loud first, exactly as written. ${initialMessage}`;
         if (openAiSocket.readyState === WebSocket.OPEN) {
-          activeRealtimeSessions.set(emergencyEventId, openAiSocket);
+          activeRealtimeSessions.set(emergencyEventId, session);
         }
         sendInitialMessage();
       }
@@ -302,6 +330,7 @@ export function registerMediaBridge(
         type: string;
         delta?: string;
         transcript?: string;
+        error?: unknown;
       };
       if (emergencyEventId && event.transcript?.trim()) {
         if (event.type === "conversation.item.input_audio_transcription.completed") {
@@ -328,15 +357,29 @@ export function registerMediaBridge(
         speechTurns += 1;
         twilioSocket.send(JSON.stringify({ event: "clear", streamSid }));
       }
+      if (event.type === "response.created") {
+        session.responseActive = true;
+      }
+      if (
+        event.type === "response.done" ||
+        event.type === "response.cancelled" ||
+        event.type === "error"
+      ) {
+        session.responseActive = false;
+        flushPendingInjections(session);
+      }
       if (event.type === "error") {
-        app.log.error({ openAiEvent: event.type }, "OpenAI Realtime error");
+        app.log.error(
+          { emergencyEventId, openAiError: event.error ?? event },
+          "OpenAI Realtime error",
+        );
       }
     });
 
     const closeBoth = () => {
       if (
         emergencyEventId &&
-        activeRealtimeSessions.get(emergencyEventId) === openAiSocket
+        activeRealtimeSessions.get(emergencyEventId)?.socket === openAiSocket
       ) {
         activeRealtimeSessions.delete(emergencyEventId);
       }

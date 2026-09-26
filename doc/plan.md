@@ -303,7 +303,7 @@ flowchart LR
 - 通話中の更新は対象 `emergency_event_id` と Twilio Call SID を照合してから会話アイテムとして注入する。
 - 通話の両者の発話をテキスト化してフィードへ保存できるよう、セッション設定で入力音声の transcription を有効にする（`session.audio.input.transcription` 相当の設定）。相手（`contact`）の発話は `response.done`/`conversation.item.done` から取得できるトランスクリプトを `type: transcript_contact` として、AI の発話は `response.output_audio_transcript.done` を `type: transcript_ai` として `updates` フィードへ書き込む。
 - 友人コメントの注入は、進行中の会話へ `conversation.item.create`（`role: user`、`content: input_text`）でテキストを追加し、直後に `response.create` を送って AI に発話させる。これは 8 章の位置・メモ注入と同じ経路を一般化したものであり、`author_type: friend` を伴わせて同じ `updates` レコードとして残す。
-- backend は AI の発話が一区切りついたタイミング（直前の `response.done` 受信後）でキューを処理し、友人コメントの割り込みを最小限にする。緊急性の高い語を含む場合の優先注入ルールは P1 で検討する。
+- backend は AI の発話が一区切りついたタイミング（`response.done` 受信後）でキューを処理し、友人コメントの割り込みを最小限にする。**2026-09-26 実装済み（rev `00029-pfg`）**: これを実装していなかった間は、発話中に `response.create` を送って Realtime に拒否され、そのターンの音声が丸ごと消える（相手には「急に声が聞こえなくなった」と見える）不具合が実際に発生した。`response.created`/`response.done` で在籍を追い、`error`/`response.cancelled` でもフラグを倒してキューが永久に詰まらないようにする。緊急性の高い語を含む場合の優先注入ルールは P1 で検討する。
 
 ## 6. データモデル案
 
