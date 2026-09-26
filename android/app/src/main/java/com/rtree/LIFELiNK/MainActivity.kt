@@ -512,7 +512,7 @@ private fun AdvertisementLinkSection(
         } ?: "ボタンを押すと、受信したAdvertisementがここに表示されます",
     )
     Text(
-        "広告パケット数はボタン押下回数ではありません。＋Beaconは約2秒ごとに常時送信します。",
+        "広告パケット数はボタン押下回数ではありません。ボタン検知モードでは1回の押下で約60秒間、1秒ごとに送信されます。",
         style = MaterialTheme.typography.bodySmall,
     )
     if (linkedDevice != null) {
