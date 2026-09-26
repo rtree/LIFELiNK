@@ -43,6 +43,22 @@ type RealtimeSession = {
 
 const activeRealtimeSessions = new Map<string, RealtimeSession>();
 
+const CONFERENCE_INSTRUCTIONS =
+  "You are a voice AI assisting an emergency. You joined a carrier three-way phone call: " +
+  "the person who pressed SOS and their trusted contact may both be on it, and you hear one " +
+  "mixed audio stream. The first human voice you hear before anyone else joins is most likely " +
+  "the SOS sender; a new voice after that is most likely the contact. You can only guess who is " +
+  "speaking, so when unsure say 'someone on the call' and never state it as fact. The SOS sender " +
+  "may be unable to speak; silence is normal, keep listening. Automated announcements such as " +
+  "hold messages ('please hold', '保留中', 'お待ちください') mean nobody can hear you: stay " +
+  "silent until a person speaks. Describe background sounds only when clearly audible, and say " +
+  "they are uncertain ('it sounds like'). Never guess or invent facts. Speak briefly and calmly, " +
+  "in the language the person on the call uses.";
+
+const HOLD_ANNOUNCEMENT = /保留|お待ちください|please hold|on hold|remain on the line/i;
+// Only hold prompts and no human for this long means the SOS sender never merged the AI back.
+const CONFERENCE_ABANDONED_MS = 90_000;
+
 function flushPendingInjections(session: RealtimeSession): void {
   if (session.responseActive || session.socket.readyState !== WebSocket.OPEN) {
     return;
@@ -217,6 +233,11 @@ export function registerMediaBridge(
     let streamSid: string | null = null;
     let emergencyEventId: string | null = null;
     let pendingInitialMessage: string | null = null;
+    let carrierConference = false;
+    let callLimitTimer: NodeJS.Timeout | null = null;
+    let conferenceInstructions: string | null = null;
+    let holdOnlySince: number | null = null;
+    let abandonTimer: NodeJS.Timeout | null = null;
     const session: RealtimeSession = {
       socket: openAiSocket,
       responseActive: false,
@@ -230,6 +251,14 @@ export function registerMediaBridge(
     const sendInitialMessage = () => {
       if (!pendingInitialMessage || openAiSocket.readyState !== WebSocket.OPEN) {
         return;
+      }
+      if (conferenceInstructions) {
+        openAiSocket.send(
+          JSON.stringify({
+            type: "session.update",
+            session: { type: "realtime", instructions: conferenceInstructions },
+          }),
+        );
       }
       openAiSocket.send(
         JSON.stringify({
@@ -253,10 +282,7 @@ export function registerMediaBridge(
           session: {
             type: "realtime",
             model: config.OPENAI_REALTIME_MODEL,
-            instructions:
-              "You are an English-speaking voice AI assisting an emergency call. " +
-              "Never guess or invent facts. Speak briefly and calmly. Answer the " +
-              "other person's questions, and say plainly when you do not know something.",
+            instructions: sessionInstructions(carrierConference),
             output_modalities: ["audio"],
             audio: {
               input: {
@@ -313,6 +339,33 @@ export function registerMediaBridge(
         }
         const initialMessage = buildInitialMessage(context);
         pendingInitialMessage = `Read the following out loud first, exactly as written. ${initialMessage}`;
+        if (context.carrierConference) {
+          carrierConference = true;
+          if (openAiSocket.readyState === WebSocket.OPEN) {
+            openAiSocket.send(
+              JSON.stringify({
+                type: "session.update",
+                session: { type: "realtime", instructions: sessionInstructions(true) },
+              }),
+            );
+          }
+          callLimitTimer = setTimeout(() => {
+            app.log.info({ emergencyEventId }, "Carrier conference AI leg reached the time limit");
+            twilioSocket.close();
+          }, CARRIER_CONFERENCE_MAX_MS);
+        }
+        if (context.carrierConference) {
+          conferenceInstructions = CONFERENCE_INSTRUCTIONS;
+          const eventId = emergencyEventId;
+          abandonTimer = setInterval(() => {
+            if (holdOnlySince && Date.now() - holdOnlySince >= CONFERENCE_ABANDONED_MS) {
+              app.log.info({ emergencyEventId: eventId }, "AI left on hold in carrier conference, hanging up");
+              onTranscript(eventId, "system", "The AI left the call because it was kept on hold");
+              // Closing the stream ends <Connect>, and with no further TwiML Twilio hangs up.
+              twilioSocket.close();
+            }
+          }, 5_000);
+        }
         if (openAiSocket.readyState === WebSocket.OPEN) {
           activeRealtimeSessions.set(emergencyEventId, session);
         }
@@ -341,7 +394,15 @@ export function registerMediaBridge(
       };
       if (emergencyEventId && event.transcript?.trim()) {
         if (event.type === "conversation.item.input_audio_transcription.completed") {
-          onTranscript(emergencyEventId, "contact", event.transcript.trim());
+          const heard = event.transcript.trim();
+          if (conferenceInstructions) {
+            if (HOLD_ANNOUNCEMENT.test(heard)) {
+              holdOnlySince ??= Date.now();
+            } else {
+              holdOnlySince = null;
+            }
+          }
+          onTranscript(emergencyEventId, "contact", heard);
         } else if (event.type === "response.output_audio_transcript.done") {
           onTranscript(emergencyEventId, "ai", event.transcript.trim());
         }
@@ -384,6 +445,14 @@ export function registerMediaBridge(
     });
 
     const closeBoth = () => {
+      if (callLimitTimer) {
+        clearTimeout(callLimitTimer);
+        callLimitTimer = null;
+      }
+      if (abandonTimer) {
+        clearInterval(abandonTimer);
+        abandonTimer = null;
+      }
       if (
         emergencyEventId &&
         activeRealtimeSessions.get(emergencyEventId)?.socket === openAiSocket
@@ -424,3 +493,27 @@ export function registerMediaBridge(
 }
 
 const MAX_PENDING_INPUT_FRAMES = 100;
+// The AI leg leaves after this; the carrier call between the humans is not ours to end.
+const CARRIER_CONFERENCE_MAX_MS = 60 * 60 * 1000;
+
+const BASE_INSTRUCTIONS =
+  "You are an English-speaking voice AI assisting an emergency call. " +
+  "Never guess or invent facts. Speak briefly and calmly. Answer the " +
+  "other person's questions, and say plainly when you do not know something.";
+
+const CARRIER_CONFERENCE_INSTRUCTIONS =
+  " This is a three-way phone call merged by the carrier. The person who pressed SOS and " +
+  "their trusted contact can both be on it, and you hear them mixed into one audio stream, " +
+  "so you cannot know for sure who is speaking. The first voice you hear after joining is " +
+  "most likely the person who pressed SOS; a new voice after that is most likely the contact. " +
+  "When it matters, say who you think is speaking and that it is a guess, or ask. " +
+  "Recorded announcements such as 'this call is on hold' or 'please wait' are automated " +
+  "messages, not people: do not answer them and stay silent until a person speaks. " +
+  "Describe background sounds only as possibilities, for example 'it sounds like', " +
+  "and never state a sound as a fact.";
+
+function sessionInstructions(carrierConference: boolean): string {
+  return carrierConference
+    ? BASE_INSTRUCTIONS + CARRIER_CONFERENCE_INSTRUCTIONS
+    : BASE_INSTRUCTIONS;
+}
