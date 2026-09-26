@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LIFELiNK — Connect to Your Trusted People.</title>
+<meta name="description" content="Download the LIFELiNK Android hackathon demo. Connect with your registered trusted contact and an AI assistant, while consenting friends receive updates on Discord. Not an emergency-services app.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="bg-fx" aria-hidden="true">
+  <span class="orb o1"></span><span class="orb o2"></span><span class="orb o3"></span>
+  <span class="grid"></span>
+</div>
+
+<!-- ===== header ===== -->
+<header class="nav" id="nav">
+  <a class="logo" href="#top">LIFEL<span class="i">i</span>NK</a>
+  <nav class="nav-links">
+    <a href="#how">How it works</a>
+    <a href="#world">World ID</a>
+  </nav>
+  <a class="btn-nav" href="https://github.com/rtree/LIFELiNK/releases/latest/download/LIFELiNK-demo-v0.1.0.apk">Download APK</a>
+  <button class="burger" id="burger" aria-label="Menu"><span></span><span></span><span></span></button>
+</header>
+
+<!-- ===== hero ===== -->
+<section class="hero" id="top">
+  <div class="hero-left">
+    <span class="eyebrow"><i class="dot"></i>EMERGENCY IN ONE PRESS</span>
+    <span class="credit-badge">Built at <b>ETHGlobal Tokyo 2026</b></span>
+    <h1>
+      Press a button.<br>
+      <span class="g-blue">AI joins your call.</span><br>
+      <span class="g-red">Your people are told.</span>
+    </h1>
+    <p class="lede">
+      In an emergency you may not have time to take out your phone, unlock it, open an app and dial.
+      <b>A long press</b> — on your phone or a linked keychain device — starts a call to your registered trusted contact.
+    </p>
+
+    <div class="hero-cta">
+      <a class="btn primary big" href="https://github.com/rtree/LIFELiNK/releases/latest/download/LIFELiNK-demo-v0.1.0.apk">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
+        Download APK
+      </a>
+      <a class="btn ghost big" href="#how">See how it works</a>
+    </div>
+
+    <p class="cta-sub">Demo v0.1.0 · Android 8.0+ · Direct APK install<br>
+      <a href="https://github.com/rtree/LIFELiNK/blob/main/HowToUse.md">Installation, requirements &amp; safety guide →</a>
+    </p>
+    <p class="demo-notice"><b>Hackathon demo, not an emergency service.</b> Calls only your registered contact, not police, fire, ambulance, or emergency numbers. Test only with consenting people. Do not rely on it as your only way to get help.</p>
+
+    <div class="trust-row">
+      <span class="tchip"><b>Verified</b> by World ID</span>
+      <span class="tchip"><b>Discord</b> — no extra app for your people</span>
+      <span class="tchip"><b>English</b> AI voice</span>
+    </div>
+  </div>
+
+  <div class="hero-right">
+    <div class="phone">
+      <span class="notch"></span>
+      <div class="p-status"><span>9:41</span><span class="ic">▮▮▮ ⌁</span></div>
+      <div class="p-screen">
+        <p class="p-top">LIFEL<span class="i">i</span>NK</p>
+        <button class="sos-btn" id="sosBtn">SOS</button>
+        <p class="p-hint" id="sosHint">Tap to preview · no real call</p>
+        <div class="p-log" id="sosLog"></div>
+      </div>
+      <span class="homebar"></span>
+    </div>
+
+    <!-- keychain fob -->
+    <div class="fob" aria-label="Keychain SOS button">
+      <span class="fob-ring"></span>
+      <div class="fob-body">
+        <button class="fob-btn" type="button">SOS</button>
+        <span class="fob-led"></span>
+        <span class="fob-brand">LIFEL<span class="i">i</span>NK</span>
+      </div>
+      <span class="fob-cap">Keychain button<br><small>Works without unlocking your phone</small></span>
+    </div>
+
+    <div class="float f1">📍 Coarse location context</div>
+    <div class="float f2">🤖 AI joins your call</div>
+    <div class="float f3">💬 Discord updates</div>
+  </div>
+</section>
+
+<!-- ===== stats ===== -->
+<section class="stats">
+  <div class="stat"><b>1</b><span>long press to start<br>the call flow</span></div>
+  <div class="stat"><b>2</b><span>channels fire<br>in parallel</span></div>
+  <div class="stat"><b>0</b><span>extra apps for friends<br>already on Discord</span></div>
+  <div class="stat"><b>1:1</b><span>one human,<br>one account</span></div>
+</section>
+
+<!-- ===== how it works ===== -->
+<section class="sec" id="how">
+  <div class="sec-head">
+    <span class="tag">HOW IT WORKS</span>
+    <h2>Five steps to connect your people.</h2>
+    <p>Set up first: a local SIM, carrier three-way calling, Google sign-in, World App, and default phone-app permission are required for SOSV2. Carrier and device behavior may vary.</p>
+  </div>
+
+  <div class="steps">
+    <article class="step s1">
+      <span class="s-n">1</span>
+      <h3>Press the SOS button</h3>
+      <p>Use three quick taps or a two-second hold in the app, or long-press a linked +Beacon. <b>With monitoring configured, the Beacon can trigger while your phone is locked.</b></p>
+    </article>
+    <article class="step s2">
+      <span class="s-n">2</span>
+      <h3>Share location context</h3>
+      <p>Available <b>coarse location context</b> and its freshness help your contact understand where you are. Precise coordinates and street addresses are not stored.</p>
+    </article>
+    <article class="step s3">
+      <span class="s-n">3</span>
+      <h3>AI joins your contact</h3>
+      <p>Your phone calls the AI and your registered contact, then asks your carrier to merge the calls. The AI shares available context and can listen to the conversation.</p>
+      <div class="quote">
+        Example introduction: “This is LIFELiNK's AI assistant. Your registered contact has triggered an SOS. I can share the available location context and notes.”
+      </div>
+    </article>
+    <article class="step s4">
+      <span class="s-n">4</span>
+      <h3>Real-time info is shared</h3>
+      <p>Coarse location, event updates and call transcripts appear in the app and are relayed to participating Discord friends. Call audio files are not stored.</p>
+    </article>
+    <article class="step s5">
+      <span class="s-n">5</span>
+      <h3>Your people can act</h3>
+      <p>Consenting family and friends receive <b>Discord</b> DMs and can reply with useful context for the AI to relay. They must complete setup and share a server with the bot first.</p>
+    </article>
+  </div>
+</section>
+
+<!-- ===== discord panel ===== -->
+<section class="sec narrow">
+  <div class="split">
+    <div class="split-txt">
+      <span class="tag">FOR YOUR PEOPLE</span>
+      <h2>They just need Discord.</h2>
+      <p class="lede">
+        No new app. No account setup during a crisis. The people you trust get the alert
+        where they already are — with everything they need to help in one message.
+      </p>
+      <ul class="ticks">
+        <li>Coarse location context, not precise coordinates</li>
+        <li>Call transcripts relayed as Discord messages</li>
+        <li>Replies passed to the AI during an active call</li>
+        <li>Your status, including battery level</li>
+        <li>Invite, consent and test DM before the demo</li>
+      </ul>
+    </div>
+
+    <div class="dc-window">
+      <div class="dc-bar"><span class="hash">#</span>Alert preview<span class="srv">ILLUSTRATION</span></div>
+      <div class="dc-msg">
+        <span class="dc-ava">L</span>
+        <div>
+          <div class="dc-name">LIFELiNK <span class="bot">BOT</span> <small>example</small></div>
+          <div class="ping">Private message to a consenting friend</div>
+          <div class="embed">
+            <div class="e-title"><i class="rec"></i>🚨 A registered member pressed the SOS button</div>
+            <div class="e-map"><span class="pin"></span></div>
+            <div class="e-f"><b>AREA (EXAMPLE)</b>Tokyo prefecture</div>
+            <div class="e-f"><b>LOCATION DETAIL</b>Coarse context only</div>
+            <div class="e-f"><b>CALL DESTINATION</b>Your registered trusted contact</div>
+            <div class="e-f"><b>IDENTITY</b>✅ Verified human (World ID)</div>
+            <div class="dc-btns">
+              <button class="dc-b red" disabled>💬 Reply (preview only)</button>
+              <button class="dc-b" disabled>Call transcript preview</button>
+            </div>
+            <div class="e-foot">Illustration only · no live event or real user data</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ===== world id ===== -->
+<section class="sec world" id="world">  <div class="sec-head">
+    <span class="tag light">TRUST</span>
+    <h2>One real person. One account.</h2>
+    <p>An emergency button that anyone can press doesn't work. Limiting who can press it is the feature.</p>
+  </div>
+
+  <div class="w-grid">
+    <div class="w-card">
+      <div class="w-ico">🧍</div>
+      <h3>Verified by World ID</h3>
+      <p>Before the SOS button is ever activated, we confirm you are a <b>real, unique human</b>. Proof is verified on our server — never trusted from the client.</p>
+    </div>
+    <div class="w-card">
+      <div class="w-ico">🛡️</div>
+      <h3>Fewer false reports</h3>
+      <p>Human verification raises the barrier to creating many accounts that consume calling resources. It is not a guarantee against false reports or abuse.</p>
+    </div>
+    <div class="w-card">
+      <div class="w-ico">🔒</div>
+      <h3>Minimum data, by design</h3>
+      <p>World ID proves human uniqueness, not your legal identity. Profile details such as name and birthday are <b>entered by you</b>. LIFELiNK does not receive ID photos or biometrics from this proof.</p>
+    </div>
+  </div>
+
+  <p class="w-note">
+    Proof of Human confirms a unique human, not a legal identity. LIFELiNK processes contact details, coarse location, event metadata and call transcripts. Read the setup guide and the README's current consent gaps before testing.
+  </p>
+</section>
+
+<footer class="foot">
+  <div class="f-top">
+    <div class="f-brand">
+      <div class="logo">LIFEL<span class="i">i</span>NK</div>
+      <span class="f-credit">Built at <b>ETHGlobal Tokyo 2026</b></span>
+    </div>
+  </div>
+  <div class="f-bot">
+    <p><a href="https://github.com/rtree/LIFELiNK/blob/main/HowToUse.md">Setup &amp; safety guide</a> · <a href="https://github.com/rtree/LIFELiNK">Source &amp; limitations</a></p>
+    <small>© 2026 LIFELiNK · ETHGlobal Tokyo 2026.</small>
+  </div>
+</footer>
+
+<script src="script.js"></script>
+</body>
+</html>

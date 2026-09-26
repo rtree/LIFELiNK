@@ -6,6 +6,7 @@
 
 ## 1. 現在地
 
+- **2026-09-27: APK 配布サイト公開済み**。URL: https://lifelink-56179519-0e8c-4306-abad-ef9019fcec0e-4qp2xid4rq-an.a.run.app 。`web/` を専用 Cloud Run（backend と別、権限なし SA、min=0/max=1）へ配置。APK は GitHub Releases の既存 URL。共有 URL は project ID/番号なしのハッシュ形式を使う（番号入り別名の存在は Cloud Run の仕様）。サービスを再作成せず同じ UUID 名へ更新。手順・証跡: `doc/ja-jp/web-distribution.md`。
 - MVP 主線（P0-01〜P0-21）は完了し、**タグ `mvp-0.1`** と `doc/ja-jp/mvp0.1.md` で保全済み。壊したらここへ戻る。
 - 動く縦断フロー: 物理ボタン（+Beacon）or 画面ボタン → Safety gate → Cloud Run → Twilio が登録先へ電話 → OpenAI Realtime の AI が都道府県とメモを話す → 同時に Discord Bot が同意済み友人へ DM → 通話の書き起こしを DM へ逐次中継 → 友人の返信が同じイベントに保存され通話中の AI に伝わる。
 - 次にやること: `doc/ja-jp/tasks.md`「次のアクション」の順。**P1-16（チャット UI）・P1-17（英語化・3 タブの B2C UI）・P1-20（SOS 連打/長押し、定期位置、電池、揺れ）は 2026-09-26 に実機確認して完了**。

@@ -4,6 +4,14 @@
 
 > 新しいセッションで作業を再開する場合は、本文書より先に `doc/ja-jp/handover.md`（壊してはいけない不変条件、環境・ビルド・デプロイ・確認コマンド、既知の落とし穴）を読むこと。本文書は設計の正本であり、必要な章だけを参照すればよい。
 
+### 2026-09-27 APK 配布サイト
+
+- ユーザー提供の `web/` のデザインを維持して、新しい Cloud Run サービス `lifelink-<uuid>` へ静的サイトのみ公開する。既存 backend、World ID、Firestore は変更しない。
+- 公開用リンクは Cloud Run が割り当てるハッシュ形式の URL を採用し、プロジェクト ID・番号を含む URL を案内しない。これは URL 表記の要件であり、公開リポジトリ等からプロジェクト情報を秘匿する仕組みではない。公式仕様: https://docs.cloud.google.com/run/docs/triggering/https-request#service_url
+- APK は `HowToUse.md` の GitHub Releases URL をそのまま使う。Cloud Run に APK やリポジトリ全体を置かず、HTML/CSS/JS だけをコンテナにコピーする。
+- 専用の権限なし実行 SA、認証不要、min=0 / max=1、asia-northeast1。既存 backend の maxScale=1 は不変。
+- 公開ページの警察通報・正確な住所共有等の未実装表現は配布ガイドに合わせる。説明用アニメーションは実発報ではないと明記し、インストール要件・安全上の注意への導線を設ける。
+
 ### 2026-09-26 現在の優先判断（以下の旧フェーズ記述より優先）
 
 - **2026-09-26 21:00 時点: SOSV2-ambientMode（キャリア3者会議）が縦断で成立し、Beacon の既定になった**。
