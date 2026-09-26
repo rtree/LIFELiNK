@@ -29,10 +29,10 @@ sequenceDiagram
 	participant R as World Bridge
 	participant V as World v4 verifier
 	A->>B: Start verification (Firebase token)
-	B->>B: Sign RP request; IDKit Proof of Human (signal = UID)
+	B->>B: Sign RP request for Proof of Human (signal = UID)
 	B-->>A: Flow ID + connector URI
 	A->>W: Open connector URI
-	W->>R: User approves; send encrypted proof
+	W->>R: User approves and sends encrypted proof
 	loop App polls own backend
 		A->>B: Check flow status (Firebase token)
 		B->>R: IDKit pollOnce()
@@ -42,16 +42,16 @@ sequenceDiagram
 	B->>V: Verify proof against RP
 	V-->>B: Verification result
 	alt Valid proof and unused nullifier
-		B->>B: Bind nullifier to UID; set human_verified
+		B->>B: Bind nullifier to UID and set human_verified
 		B-->>A: Verified
 	else Invalid or replayed
-		B-->>A: Failed; no new claim
+		B-->>A: Failed without a new claim
 	end
 	A->>B: SOS with refreshed Firebase token
 	alt Verified claim
 		B->>B: Create event, start calling flow
 	else Missing claim
-		B-->>A: 403; no event or call
+		B-->>A: 403 - no event or call
 	end
 ```
 
