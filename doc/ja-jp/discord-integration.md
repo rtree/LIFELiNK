@@ -36,4 +36,4 @@
 
 ## 未実施のもの
 
-この文書は公開公式資料と現行設計の整理、および上記の **Secret メタデータ確認**の記録。Secret の内容・Discord API 接続・DM 到達・受信同意は未検証。P0-14a/P0-15 は通過済みで、P0-16 から実装と schema を `doc/plan.md` に先に確定し、既存の `emergency_events`/`updates` を用いた実データの縦断試験に進む。
+この文書は公開公式資料と現行設計の整理、および上記の **Secret メタデータ確認**の記録。Secret の内容・Discord API 接続・DM 到達・受信同意は未検証。P0-14a/P0-15 は通過済みで、P0-16 から実装と schema を `doc/ja-jp/plan.md` に先に確定し、既存の `emergency_events`/`updates` を用いた実データの縦断試験に進む。
