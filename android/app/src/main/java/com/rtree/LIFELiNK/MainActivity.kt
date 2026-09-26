@@ -15,6 +15,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -23,6 +24,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -49,12 +52,15 @@ import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.GoogleAuthProvider
 import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -101,6 +107,9 @@ private fun SetupScreen() {
     var emergencyText by remember { mutableStateOf("緊急発信は待機中です") }
     var activeEmergencyEventId by remember { mutableStateOf<String?>(null) }
     var beaconText by remember { mutableStateOf("Beacon監視は停止中です") }
+    var beaconDiagnosticText by remember { mutableStateOf("") }
+    var linkedTriggerDevice by remember { mutableStateOf(emergencyPreferences.linkedTriggerDevice) }
+    val observedAdvertisements by AdvertisementRegistry.observations.collectAsStateWithLifecycle()
 
     LaunchedEffect(initialUser?.uid) {
         val claims = initialUser?.getIdToken(false)?.await()?.claims.orEmpty()
@@ -343,8 +352,13 @@ private fun SetupScreen() {
                             initialNote = initialNote,
                         )
                     }.onSuccess { event ->
-                        activeEmergencyEventId = event.eventId
                         emergencyText = "発信状態: ${event.state}"
+                        if (event.state in TERMINAL_EVENT_STATES) {
+                            safetyGate.clear(event.eventId)
+                            activeEmergencyEventId = null
+                            return@onSuccess
+                        }
+                        activeEmergencyEventId = event.eventId
                         while (event.state !in TERMINAL_EVENT_STATES) {
                             delay(EVENT_STATUS_POLL_INTERVAL_MS)
                             val latest = runCatching {
@@ -413,8 +427,141 @@ private fun SetupScreen() {
         ) {
             Text("Beacon監視を開始")
         }
+        AdvertisementLinkSection(
+            observations = observedAdvertisements,
+            linkedDevice = linkedTriggerDevice,
+            onLink = { observation ->
+                emergencyPreferences.linkTrigger(observation)
+                linkedTriggerDevice = emergencyPreferences.linkedTriggerDevice
+                if (BeaconTriggerManager.hasPermission(context)) {
+                    BeaconTriggerManager.stop(context)
+                    BeaconTriggerManager.start(context)
+                    beaconText = "${observation.suggestedTransport?.label}リンク済み・監視中"
+                }
+            },
+            onUnlink = {
+                emergencyPreferences.linkedTriggerDevice = null
+                linkedTriggerDevice = null
+                if (BeaconTriggerManager.hasPermission(context)) {
+                    BeaconTriggerManager.stop(context)
+                    BeaconTriggerManager.start(context)
+                    beaconText = "既定Beaconを監視中"
+                }
+            },
+        )
+        if (BuildConfig.DEBUG) {
+            Text(beaconDiagnosticText)
+            Button(
+                modifier = Modifier.fillMaxWidth(),
+                onClick = {
+                    beaconDiagnosticText = runCatching {
+                        BeaconTriggerManager.diagnoseNextIBeacon(context) { identity ->
+                            scope.launch {
+                                beaconDiagnosticText = "検出: $identity"
+                            }
+                        }
+                        "iBeacon広告を待っています"
+                    }.getOrElse { error ->
+                        "Beacon診断失敗: ${error.userMessage()}"
+                    }
+                },
+            ) {
+                Text("Beacon識別子を診断")
+            }
+        }
         Spacer(Modifier.height(12.dp))
         Text("Backend: ${BuildConfig.BACKEND_URL}", style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+@Composable
+private fun AdvertisementLinkSection(
+    observations: List<AdvertisementObservation>,
+    linkedDevice: LinkedTriggerDevice?,
+    onLink: (AdvertisementObservation) -> Unit,
+    onUnlink: () -> Unit,
+) {
+    HorizontalDivider()
+    Text("物理ボタンをリンク", style = MaterialTheme.typography.titleLarge)
+    Text(
+        linkedDevice?.let { device ->
+            "リンク済み: ${device.transport.label} / ${device.title}"
+        } ?: "ボタンを押すと、受信したAdvertisementがここに表示されます",
+    )
+    Text(
+        "広告パケット数はボタン押下回数ではありません。＋Beaconは約2秒ごとに常時送信します。",
+        style = MaterialTheme.typography.bodySmall,
+    )
+    if (linkedDevice != null) {
+        Button(onClick = onUnlink, modifier = Modifier.fillMaxWidth()) {
+            Text("リンクを解除")
+        }
+    }
+
+    AdvertisementKind.entries.forEach { kind ->
+        val entries = observations
+            .filter { it.kind == kind }
+            .sortedWith(
+                compareBy<AdvertisementObservation, String>(String.CASE_INSENSITIVE_ORDER) { it.title }
+                    .thenBy { it.key },
+            )
+        if (entries.isEmpty()) return@forEach
+        Text(kind.label, style = MaterialTheme.typography.titleMedium)
+        entries.forEach { observation ->
+            AdvertisementObservationCard(
+                observation = observation,
+                isLinked = linkedDevice?.key == observation.key,
+                onLink = { onLink(observation) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun AdvertisementObservationCard(
+    observation: AdvertisementObservation,
+    isLinked: Boolean,
+    onLink: () -> Unit,
+) {
+    val lastSeenTime = remember(observation.lastSeenAtMillis) {
+        LAST_SEEN_TIME_FORMATTER.format(
+            Instant.ofEpochMilli(observation.lastSeenAtMillis)
+                .atZone(ZoneId.systemDefault()),
+        )
+    }
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(observation.title, style = MaterialTheme.typography.titleMedium)
+                Text("最終 $lastSeenTime")
+            }
+            Text(observation.detail, style = MaterialTheme.typography.bodySmall)
+            Text("RSSI ${observation.rssi} dBm / 広告 ${observation.seenCount}パケット")
+            if (observation.beaconBatteryLow == true) {
+                Text("電池低下", color = MaterialTheme.colorScheme.error)
+            }
+            when {
+                isLinked -> Text("リンク済み (${observation.suggestedTransport?.label})")
+                observation.suggestedTransport == TriggerTransport.GATT -> {
+                    Button(onClick = onLink, modifier = Modifier.fillMaxWidth()) {
+                        Text("GATT候補としてリンク")
+                    }
+                    Text("GATT接続は次段階で有効化します", style = MaterialTheme.typography.bodySmall)
+                }
+                observation.suggestedTransport == TriggerTransport.BEACON -> {
+                    Button(onClick = onLink, modifier = Modifier.fillMaxWidth()) {
+                        Text("このBeaconをリンク")
+                    }
+                }
+                else -> Text("観測のみ（リンク非対応）", style = MaterialTheme.typography.bodySmall)
+            }
+        }
     }
 }
 
@@ -527,3 +674,4 @@ private const val EMERGENCY_CONFIRM_WINDOW_MS = 10_000L
 private const val EVENT_STATUS_POLL_INTERVAL_MS = 2_000L
 private const val WORLD_ID_STATUS_POLL_INTERVAL_MS = 2_000L
 private val TERMINAL_EVENT_STATES = setOf("completed", "failed")
+private val LAST_SEEN_TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm:ss")
