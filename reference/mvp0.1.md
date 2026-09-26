@@ -52,6 +52,8 @@ Cloud Run の参照は `:latest`。すべて version 1 が最新なので、こ�
 
 ## 3. Firestore のデータ（本物のスキーマ）
 
+**実データのバックアップ**: 2026-09-26 14:13（JST）に `(default)` 全体を `gs://ethglobaltokyo2026lifelink-firestore-backups/mvp-0.1-2026-09-26` へ export 済み（操作 `SUCCESSFUL`、104 ドキュメント、59.6 KB。バケットは `asia-northeast1`、均一アクセス、公開アクセス防止）。電話番号・Discord ID・通話書き起こしを含むためバケットを公開しないこと。戻すときは `gcloud firestore import gs://ethglobaltokyo2026lifelink-firestore-backups/mvp-0.1-2026-09-26 --project=ethglobaltokyo2026lifelink`（同じ ID のドキュメントは上書きされる。新しく作られたドキュメントは消えない）。
+
 | パス | 内容 |
 | --- | --- |
 | `users/{uid}` | 利用者 |

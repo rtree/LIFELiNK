@@ -28,10 +28,11 @@ P0-15 は電話/iBeacon の **happy path** の通過点であり、製品全体�
 | P0-14a | DONE | ＋Beaconのボタン1/2・短押し/長押しと広告UUID/Major/Minorの対応をドライランで実測し、発信トリガーにする識別値を確定する | P0-14 | 2026-09-26: 実測で Beacon0=待機、Beacon1/2=ボタン1/2、Major bit14=長押しと確定（`doc/plan.md` 6b 章）。旧トリガーが待機広告だった不具合を修正し、長押し bit のみで発信候補にする実装を Samsung 実機へ導入済み。残り: ドライランで短押し→候補なし・長押し→候補1回を実機確認し、その後ドライランOFFで実通話1回を再確認。追記: 利用者ごとのスロット登録（未リンク時はトリガー無効）、PendingIntent LOW_LATENCY 化、反応速度の分解計測ログ（選択/一括コピー・logcat `LIFELiNK.BeaconLog`）、表示を iBeacon/XIAO のみに絞る変更を実機へ導入済み。**既存リンクは旧形式のため再リンクが必要**。完了（2026-09-26 11:10）: ドライランで短押し 0・長押し 1 を画面 ON/ロック中とも確認、常駐 FGS でロック中も受信、ドライラン OFF で長押し 1 回→`POST /v1/emergency-events` 1 回→Twilio `completed` 46 秒の実通話（押下から着信約 7 秒） |
 | P0-15 | DONE | 電話・修正後の iBeacon 連動を含む MVP の縦断フローを実端末で確認する（失敗系は 2026-09-26 の人間判断で P3-01 へ分離） | P0-10〜P0-14a | 2026-09-26 11:10: 常駐見守り中の長押し 1 回→イベント 1 件→Twilio `completed` 46 秒の実通話。短押し/待機で発信 0。Discord 着手のゲートを開放 |
 | P0-16 | DONE | Discord 個別連絡の実 Firestore スキーマ/API 契約を先に凍結し、Portal Redirect URL/Installation、Cloud Run の Bot/OAuth Secret・非秘密 ID/公開鍵、署名検証/PING 対応を準備する | P0-15、P0.5-11 | 2026-09-26: `doc/plan.md`「P0-16 凍結スキーマ・API」に確定。Discord 用 2 Secret のみ実行 SA に付与し Cloud Run rev `00023-c54` へ割当。Bot token の有効性を `/users/@me` で確認（値は非表示）。Interactions Endpoint URL を API で登録し Discord の署名付き PING 検証が通過。不正署名は 401。Firestore rules をデプロイ。**残: Portal の OAuth2 Redirect URL 登録（人間）** |
-| P0-17 | IN PROGRESS | 発信者がアプリから招待を作成し、相手が Discord 本人確認と緊急 DM/都道府県共有に明示同意して、承認済み連絡先の一覧と解除を使えるようにする | P0-16、受信者本人の同意 | 実装・デプロイ済み（`24bf108`、Android に招待作成/共有・一覧・解除）。実アカウントでの招待→同意→登録は未検証。実アカウントの Discord ID が Firebase UID 配下の本人発行招待と一度だけ結び付き、期限切れ/再利用/なりすましを拒否。Discord 全友人一覧には依存しない |
-| P0-18 | IN PROGRESS | 承認した相手へ Bot テスト DM を送り、ボタン応答で到達確認する | P0-17 | 実装済み（`ack:` ボタン→`last_test_dm.acknowledged_at`）。実 Discord アカウントの受信と応答を確認。送信失敗・未着は成功と表示しない |
-| P0-19 | IN PROGRESS | 実緊急電話イベント作成と並行して同意済み相手へ DM を試み、署名検証済みボタン→モーダル返信を同じイベントの参考情報へ一度だけ保存する | P0-18 | 実装済み（`discord_notifications` を create で重複防止、返信は `updates/discord_{interaction_id}`）。実 Firestore `emergency_events/{id}/updates` に権限を照合した返信を記録し、DM の配送状態/再送重複を管理。GPS 座標・詳細住所・録音を送らず、第三者返信を無断で AI に注入しない |
-| P0-20 | TODO | 電話+iBeacon+Discord を同意済み実端末・実アカウントで縦断確認する | P0-19 | 1 回の長押しで電話 1 回/DM 1 回、相手の返信 1 件が同じイベントに紐づく。再送でも重複せず、Discord の不達/障害が電話を止めない証跡を残す。ここで Discord 込みの MVP 主線が完了 |
+| P0-17 | DONE | 発信者がアプリから招待を作成し、相手が Discord 本人確認と緊急 DM/都道府県共有に明示同意して、承認済み連絡先の一覧と解除を使えるようにする | P0-16、受信者本人の同意 | 実装・デプロイ済み（`24bf108`、Android に招待作成/共有・一覧・解除）。実アカウントでの招待→同意→登録は未検証。実アカウントの Discord ID が Firebase UID 配下の本人発行招待と一度だけ結び付き、期限切れ/再利用/なりすましを拒否。Discord 全友人一覧には依存しない |
+| P0-18 | DONE | 承認した相手へ Bot テスト DM を送り、ボタン応答で到達確認する | P0-17 | 実装済み（`ack:` ボタン→`last_test_dm.acknowledged_at`）。実 Discord アカウントの受信と応答を確認。送信失敗・未着は成功と表示しない |
+| P0-19 | DONE | 実緊急電話イベント作成と並行して同意済み相手へ DM を試み、署名検証済みボタン→モーダル返信を同じイベントの参考情報へ一度だけ保存する | P0-18 | 実装済み（`discord_notifications` を create で重複防止、返信は `updates/discord_{interaction_id}`）。実 Firestore `emergency_events/{id}/updates` に権限を照合した返信を記録し、DM の配送状態/再送重複を管理。GPS 座標・詳細住所・録音を送らず、第三者返信を無断で AI に注入しない |
+| P0-20 | DONE | 電話+iBeacon+Discord を同意済み実端末・実アカウントで縦断確認する | P0-19 | 2026-09-26: 実 Discord アカウントで招待→同意→登録→テスト DM（Bot と同じサーバーが必要、無いと `50278`）→緊急発信で電話と緊急 DM、通話書き起こしの DM 中継、友人の複数回返信が同じイベントに保存され通話中 AI が伝えることを人間が確認（「かなりいい」、細かい改善点は次段）。Cloud Run rev `00025-qb8` |
+| P0-21 | DONE | **MVP 0.1 の保全（主線の終点）**: 動いている状態を再現可能な形で固定する（コード・インフラ設定・外部サービス設定・ Firestore 実データ） | P0-20 | 2026-09-26: `reference/mvp0.1.md`（commit・Cloud Run image digest・環境変数と Secret 名/version・Discord/Twilio/World ID/Beacon 設定・Firestore スキーマ・再現手順・チェックリスト・既知制約）を追加し Git タグ `mvp-0.1`（`5e67c3e`）を push。Firestore 全体を `gs://ethglobaltokyo2026lifelink-firestore-backups/mvp-0.1-2026-09-26`（asia-northeast1、公開アクセス防止、104 ドキュメント / 59.6 KB、操作 `SUCCESSFUL`）へ export。**ここで Discord 込みの MVP 主線は完了** |
 
 注記(2026-09-26、解消済み): `requireHumanVerification` が要求する `human_verified` custom claimはWorld ID proof成功後に設定され、物理端末で発信認可へ利用できる状態を確認済み。
 
@@ -103,7 +104,7 @@ P0-15 は電話/iBeacon の **happy path** の通過点であり、製品全体�
 
 ## 次のアクション
 
-Google ログイン、World ID、同意済み番号への AI 双方向電話・通話中メモ、修正後の iBeacon 長押し→実通話は実機確認済み（P0-15 は happy path の完了）。**MVP 主線の次の未完了区間は Discord 個別連絡（P0-16〜P0-20）**。Portal アプリと Bot/OAuth Secret は準備済みだが、Cloud Run 接続、受信者の本人同意、DM と返信はまだ未実施。失敗系の網羅と長時間ロックは P3。
+**2026-09-26 時点で MVP 主線（P0-01〜P0-21）は完了し、MVP 0.1 として保全済み**（`reference/mvp0.1.md`、タグ `mvp-0.1`、Firestore export `gs://ethglobaltokyo2026lifelink-firestore-backups/mvp-0.1-2026-09-26`）。壊れたらここへ戻る。失敗系の網羅と長時間ロックは P3。
 
-1. **現在の MVP 主線 P0-16〜P0-20**: データ契約→招待・受信同意→Bot テスト DM→電話と同時 DM→返信の実データ保存を実 Discord アカウントで検証する。
-2. 成功後に P2 最小パスと Full UI へ進む。Google 同士のアプリ内友人リンクは提出スコープ外の将来選択肢とし、Discord で必要性を再評価する。AI への返信注入、GATT、録音も別途判断する。
+1. Discord/電話の細かい改善点を洗い出して次段のタスクにする。
+2. P2 最小パスと Full UI へ進む（リファクタリング時は `reference/mvp0.1.md` の「既知の制約」、特に `maxScale=1` 前提に注意）。Google 同士のアプリ内友人リンク、GATT、録音は別途判断。
