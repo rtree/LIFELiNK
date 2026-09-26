@@ -590,6 +590,9 @@ private fun AdvertisementObservationCard(
             }
             Text(observation.detail, style = MaterialTheme.typography.bodySmall)
             Text("RSSI ${observation.rssi} dBm / 広告 ${observation.seenCount}パケット")
+            if (observation.beaconLongPress == true) {
+                Text("最新パケット: 長押し")
+            }
             if (observation.beaconBatteryLow == true) {
                 Text("電池低下", color = MaterialTheme.colorScheme.error)
             }
@@ -605,6 +608,10 @@ private fun AdvertisementObservationCard(
                     Button(onClick = onLink, modifier = Modifier.fillMaxWidth()) {
                         Text("このBeaconをリンク")
                     }
+                    Text(
+                        "リンク後はこの機器のボタン1/2どちらの長押しでも発信候補になります（短押し・待機広告では発信しません）",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
                 }
                 else -> Text("観測のみ（リンク非対応）", style = MaterialTheme.typography.bodySmall)
             }

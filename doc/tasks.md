@@ -23,7 +23,7 @@
 | P0-12 | DONE | 鮮度付き初回発話を実装する | P0-05、P0-11 | 物理端末で取得した都道府県と情報の鮮度を実通話の初回AI音声で再生確認。座標・精度・詳細住所は発話しない |
 | P0-13 | DONE | Android の通話中メモ・位置更新を AI へ注入する | P0-11、P0-12 | 2026-09-26: 167秒の実通話中にAndroidから追加メモを送信し、API HTTP 202、Firestore保存・AI配達時刻、受電側でのAI音声読み上げを確認。受話8,315フレーム、AI出力511フレーム、発話4ターンを記録 |
 | P0-14 | DONE | BLE Beacon 経路（専用 UUID/Major/Minor 広告、`BeaconReceiver`/Filter/PendingIntent、重複排除）を Safety gate へ接続する | P0-09 | 2026-09-26: 物理広告をcompany ID `0x004C`・iBeacon prefix `0x02 0x15`として2回観測し、実UUID/Major/Minorへ完全一致filterを更新。長押し1回から`trigger_type: ble`のeventと25秒の実通話が1件だけ発生し、後続広告は30秒窓ですべて重複抑止された |
-| P0-14a | IN PROGRESS | ＋Beaconのボタン1/2・短押し/長押しと広告UUID/Major/Minorの対応をドライランで実測し、発信トリガーにする識別値を確定する | P0-14 | 2026-09-26: Beaconドライラン（既定ON）と状態遷移ログを実装し、Samsung実機へ導入・起動確認済み。残り: 各操作を個別に行いログを記録、対応表を `doc/plan.md` 6b 章へ反映 |
+| P0-14a | IN PROGRESS | ＋Beaconのボタン1/2・短押し/長押しと広告UUID/Major/Minorの対応をドライランで実測し、発信トリガーにする識別値を確定する | P0-14 | 2026-09-26: 実測で Beacon0=待機、Beacon1/2=ボタン1/2、Major bit14=長押しと確定（`doc/plan.md` 6b 章）。旧トリガーが待機広告だった不具合を修正し、長押し bit のみで発信候補にする実装を Samsung 実機へ導入済み。残り: ドライランで短押し→候補なし・長押し→候補1回を実機確認し、その後ドライランOFFで実通話1回を再確認 |
 | P0-15 | TODO | MVP の失敗系と縦断フローを実端末で確認する | P0-10〜P0-14 | 権限拒否・通信断・外部 API 障害で二重発信せず、実通話証跡あり |
 
 注記(2026-09-26、解消済み): `requireHumanVerification` が要求する `human_verified` custom claimはWorld ID proof成功後に設定され、物理端末で発信認可へ利用できる状態を確認済み。

@@ -30,14 +30,17 @@ data class AdvertisementObservation(
     val beaconMajor: Int? = null,
     val beaconMinor: Int? = null,
     val beaconBatteryLow: Boolean? = null,
+    val beaconLongPress: Boolean? = null,
     val gattServiceUuid: String? = null,
 )
 
-private data class IBeaconIdentity(
+// +Beacon Major: bit15 = battery low, bit14 = long press, bits0-13 = configured slot Major.
+data class IBeaconIdentity(
     val uuid: String,
     val major: Int,
     val minor: Int,
     val batteryLow: Boolean,
+    val longPress: Boolean,
 )
 
 data class BeaconLogEntry(
@@ -88,6 +91,7 @@ object AdvertisementRegistry {
         if (observation.kind != AdvertisementKind.IBEACON) return
         val address = observation.deviceAddress ?: return
         val identity = "${observation.beaconUuid} / ${observation.beaconMajor} / ${observation.beaconMinor}" +
+            (if (observation.beaconLongPress == true) " (長押し)" else "") +
             if (observation.beaconBatteryLow == true) " (電池低下)" else ""
         val previous = lastIBeaconIdentityByAddress.put(address, identity)
         if (previous == identity) return
@@ -119,6 +123,7 @@ object AdvertisementRegistry {
                 beaconMajor = iBeacon.major,
                 beaconMinor = iBeacon.minor,
                 beaconBatteryLow = iBeacon.batteryLow,
+                beaconLongPress = iBeacon.longPress,
             )
         }
 
@@ -168,6 +173,9 @@ object AdvertisementRegistry {
         )
     }
 
+    fun parseIBeacon(result: ScanResult): IBeaconIdentity? =
+        result.scanRecord?.getManufacturerSpecificData(APPLE_COMPANY_ID)?.let(::parseIBeacon)
+
     private fun parseIBeacon(data: ByteArray): IBeaconIdentity? {
         if (data.size < 22 || data[0] != 0x02.toByte() || data[1] != 0x15.toByte()) {
             return null
@@ -182,9 +190,10 @@ object AdvertisementRegistry {
         val minor = ((data[20].toInt() and 0xff) shl 8) or (data[21].toInt() and 0xff)
         return IBeaconIdentity(
             uuid = uuid,
-            major = rawMajor and 0x7fff,
+            major = rawMajor and 0x3fff,
             minor = minor,
             batteryLow = rawMajor and 0x8000 != 0,
+            longPress = rawMajor and 0x4000 != 0,
         )
     }
 }
