@@ -13,6 +13,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
@@ -238,7 +239,9 @@ object BeaconTriggerManager {
 class BeaconReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != BeaconTriggerManager.ACTION_BEACON_RESULT) return
+        val nowNanos = SystemClock.elapsedRealtimeNanos()
         val results = scanResults(intent)
+            .filter { nowNanos - it.timestampNanos <= MAX_ADVERTISEMENT_AGE_NANOS }
             .filter { BeaconTriggerManager.isTriggerAdvertisement(context, it) }
         if (results.isEmpty()) return
         Log.i(LOG_TAG, "Long-press Beacon advertisement received")
@@ -317,6 +320,7 @@ class BeaconReceiver : BroadcastReceiver() {
             ).orEmpty()
         }
 
+        const val MAX_ADVERTISEMENT_AGE_NANOS = 10_000_000_000L
     private companion object {
         const val LOG_TAG = "LIFELiNK.Beacon"
         val TERMINAL_EVENT_STATES = setOf("completed", "failed")
