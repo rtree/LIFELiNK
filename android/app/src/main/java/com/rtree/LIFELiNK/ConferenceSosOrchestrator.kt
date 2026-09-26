@@ -90,14 +90,10 @@ object ConferenceSosOrchestrator {
                 return@launch
             }
             report("Your contact answered. Merging…")
+            CallRegistry.merge(contactCall, aiCall)
             val merged = withTimeoutOrNull(MERGE_TIMEOUT_MS) {
-                while (true) {
-                    if (aiCall.parent != null || contactCall.parent != null) return@withTimeoutOrNull true
-                    CallRegistry.merge(contactCall, aiCall)
-                    delay(1_000)
-                }
-                @Suppress("UNREACHABLE_CODE")
-                false
+                CallRegistry.calls.first { calls -> isMerged(calls, aiCall, contactCall) }
+                true
             } ?: false
             report(
                 if (merged) "You, your contact, and the AI are on one call"
@@ -105,6 +101,17 @@ object ConferenceSosOrchestrator {
             )
         }
         return true
+    }
+
+    // IMS replaces both calls with a new conference call instead of parenting them.
+    private fun isMerged(calls: List<CallSnapshot>, aiCall: Call, contactCall: Call): Boolean {
+        if (aiCall.parent != null || contactCall.parent != null) return true
+        val conferenceActive = calls.any { it.isConference && it.state == Call.STATE_ACTIVE }
+        val mergedAway = listOf(aiCall, contactCall).any {
+            CallRegistry.callState(it) == Call.STATE_DISCONNECTED &&
+                it.details.disconnectCause?.reason?.contains("MERGED") == true
+        }
+        return conferenceActive || mergedAway
     }
 
     private suspend fun awaitCall(number: String, timeoutMs: Long): Call? = withTimeoutOrNull(timeoutMs) {

@@ -36,6 +36,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -1369,6 +1370,12 @@ private fun PhoneAppSection() {
         },
     ) {
         Text(if (isDefault) "Change the phone app" else "Make LIFELiNK the phone app")
+    }
+    OutlinedButton(
+        modifier = Modifier.fillMaxWidth(),
+        onClick = { context.startActivity(Intent(context, DialerActivity::class.java)) },
+    ) {
+        Text("Open the dial pad")
     }
 }
 
