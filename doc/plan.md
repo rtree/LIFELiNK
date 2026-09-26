@@ -24,7 +24,25 @@
 - 生音声を永続化しないが、電話音声はキャリア・Twilio・OpenAI へ流れる。利用者と同意済み参加者への説明、Discord 共有、
   出力ルート／音漏れを確認する。ローカル録音案（P2-09〜11）は別の代替として保持し、電話実験の前提にしない。
 - 調査・証拠・段階ゲート・ロールバックは **`reference/ambient-verification.md` 0章**、実験タスクは **P2-12〜16**。
-  今回は文書のみ変更し、番号・クラウド・アプリの実装や設定は変更しない。
+
+### キャリア会議実験の凍結契約（P2-12、2026-09-26、人間承認済み）
+
+AI 待受番号は Twilio `PNbe25648b5f32bd261cb3ac9039855fd3`（番号本体は Cloud Run env `TWILIO_AI_INBOUND_NUMBER`、リポジトリに書かない）。
+
+- `POST /v1/emergency-events` に任意の `mode: "outbound" | "carrier_conference"`（既定 `outbound`＝従来どおり）。
+  `carrier_conference` では Discord 通知は従来どおり、**Twilio outbound はしない**。応答に
+  `ai_number`、`join_code`（6 桁）、`join_expires_at`（10 分後）を追加。同じ event ID の再送では、未使用ならコードを再発行する。
+- `emergency_events/{id}` への追加フィールド（backend のみ書く）:
+  `mode`、`join_code_hash`（SHA-256。原文は保存・ログしない）、`join_expires_at`、`join_used_at`。
+  既存 `state` の意味は維持: 作成時 `accepted` → コード一致で `in_progress`（AI 着信の CallSid を `twilio_call_sid` に一度だけ bind）→ AI レッグ終了で `completed`。
+- `POST /v1/twilio/inbound`（番号の Voice URL、署名検証、`To` が AI 番号であること）: `<Gather>` で DTMF 6 桁を求める。
+- `POST /v1/twilio/inbound/join`（署名検証）: ハッシュ一致・未使用・期限内・未 bind・state が `accepted` の event だけを bind し、
+  既存と同じ `<Connect><Stream>`（`<Parameter emergencyEventId>`）へ。不一致は何も読み上げず切る。
+- `POST /v1/twilio/inbound/status`（番号の status callback、署名検証）: CallSid で event を引き、終了系なら `completed`。
+- 初回発話は「LIFELiNK の AI がこの通話に参加した。本人と信頼できる連絡先が同じ通話にいる可能性がある」と前置きして既存の状況説明を続ける。
+- `updates.type: transcript_contact` は変えない。carrier_conference では**本人と連絡先の混合音声**を意味する（Discord 表示は既存の "Person on the call" のまま）。
+- DTMF が通らなかった場合の代替（人間承認済み）: 発信者番号だけで本人扱いする。そのときは本節を先に直す。
+- Android の最初の実装は Home に「Experimental: conference SOS」ボタンを置き、コードを表示して `ACTION_DIAL`（`tel:<AI番号>,,<code>`）で標準ダイアラーを開くだけ。自作ダイアラー（P2-15）・Beacon 選択（P2-16）はこの後。
 
 ## 1. プロダクトのゴール
 

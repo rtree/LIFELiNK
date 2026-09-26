@@ -130,6 +130,7 @@ private fun SetupScreen() {
     var sosTapCount by remember { mutableStateOf(0) }
     var sosHoldProgress by remember { mutableStateOf(0f) }
     var emergencyText by remember { mutableStateOf("Ready") }
+    var conferenceJoin by remember { mutableStateOf<Pair<String, String>?>(null) }
     var activeEmergencyEventId by remember { mutableStateOf<String?>(null) }
     var beaconText by remember { mutableStateOf("Button watch is off") }
     var linkedTriggerDevice by remember { mutableStateOf(emergencyPreferences.linkedTriggerDevice) }
@@ -250,7 +251,7 @@ private fun SetupScreen() {
         }
     }
 
-    fun launchEmergency() {
+    fun launchEmergency(mode: String = LifeLinkApiClient.MODE_OUTBOUND) {
         val selectedContactId = contactId ?: return
         val attempt = safetyGate.begin(selectedContactId)
         emergencyText = if (attempt.isRetry) "Resending the same request" else "Sending your SOS"
@@ -262,12 +263,18 @@ private fun SetupScreen() {
                     trigger = ScreenButtonEmergencyTrigger,
                     location = currentLocation,
                     initialNote = initialNote,
+                    mode = mode,
                 )
             }.onSuccess { event ->
                 emergencyText = callStateText(event.state)
+                if (event.aiNumber != null && event.joinCode != null) {
+                    conferenceJoin = event.aiNumber to event.joinCode
+                    emergencyText = "Call the AI, then add and merge your contact"
+                }
                 if (event.state in TERMINAL_EVENT_STATES) {
                     safetyGate.clear(event.eventId)
                     activeEmergencyEventId = null
+                    conferenceJoin = null
                     return@onSuccess
                 }
                 activeEmergencyEventId = event.eventId
@@ -279,8 +286,12 @@ private fun SetupScreen() {
                         emergencyText = "Checking status failed, retrying: ${error.userMessage()}"
                         continue
                     }
-                    emergencyText = callStateText(latest.state)
+                    if (conferenceJoin == null || latest.state != "accepted") {
+                        emergencyText = callStateText(latest.state)
+                    }
+                    if (latest.state != "accepted") conferenceJoin = null
                     if (latest.state in TERMINAL_EVENT_STATES) {
+                        latest.failureCode?.let { emergencyText += " ($it)" }
                         safetyGate.clear(event.eventId)
                         activeEmergencyEventId = null
                         break
@@ -454,6 +465,16 @@ private fun SetupScreen() {
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    ConferenceSosSection(
+                        enabled = contactId != null && activeEmergencyEventId == null,
+                        join = conferenceJoin,
+                        onStart = { launchEmergency(LifeLinkApiClient.MODE_CARRIER_CONFERENCE) },
+                        onCallAi = { (number, code) ->
+                            context.startActivity(
+                                Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", "$number,,$code", null)),
+                            )
+                        },
                     )
                     OutlinedTextField(
                         modifier = Modifier.fillMaxWidth(),
@@ -1251,6 +1272,48 @@ private fun LocationSnapshot.displayText(): String = buildString {
     when (motionState) {
         MotionMonitor.STATE_SHAKING -> append("\nBeing shaken hard")
         MotionMonitor.STATE_MOVING -> append("\nMoving")
+    }
+}
+
+@Composable
+private fun ConferenceSosSection(
+    enabled: Boolean,
+    join: Pair<String, String>?,
+    onStart: () -> Unit,
+    onCallAi: (Pair<String, String>) -> Unit,
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text("Experimental: conference SOS", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "Instead of LIFELiNK calling your contact, you call the AI yourself, then use " +
+                    "\"Add call\" for your contact and \"Merge\". Your Discord members still get a DM.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (join == null) {
+                Button(modifier = Modifier.fillMaxWidth(), enabled = enabled, onClick = onStart) {
+                    Text("Start conference SOS")
+                }
+            } else {
+                Text(
+                    "Join code: ${join.second} (valid for 10 minutes)",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+                Button(modifier = Modifier.fillMaxWidth(), onClick = { onCallAi(join) }) {
+                    Text("Call the AI")
+                }
+                Text(
+                    "The code is typed automatically after the AI answers. If not, enter it on the keypad.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
     }
 }
 

@@ -58,6 +58,8 @@ data class EmergencyEventResult(
     val eventId: String,
     val state: String,
     val idempotentReplay: Boolean,
+    val aiNumber: String? = null,
+    val joinCode: String? = null,
 )
 
 data class EmergencyEventStatus(
@@ -92,6 +94,11 @@ class ApiException(
 class LifeLinkApiClient(
     private val backendUrl: String = BuildConfig.BACKEND_URL,
 ) {
+    companion object {
+        const val MODE_OUTBOUND = "outbound"
+        const val MODE_CARRIER_CONFERENCE = "carrier_conference"
+    }
+
     suspend fun saveLocation(location: LocationSnapshot): String {
         val response = post("/v1/locations", location.toJson())
         return response.getString("location_id")
@@ -114,6 +121,7 @@ class LifeLinkApiClient(
         trigger: EmergencyTrigger,
         location: LocationSnapshot?,
         initialNote: String?,
+        mode: String = MODE_OUTBOUND,
     ): EmergencyEventResult {
         val response = post(
             "/v1/emergency-events",
@@ -122,12 +130,15 @@ class LifeLinkApiClient(
                 .put("contact_id", contactId)
                 .put("trigger_type", trigger.wireValue)
                 .put("location_snapshot", location?.toJson() ?: JSONObject.NULL)
-                .put("initial_note", initialNote?.takeIf(String::isNotBlank) ?: JSONObject.NULL),
+                .put("initial_note", initialNote?.takeIf(String::isNotBlank) ?: JSONObject.NULL)
+                .put("mode", mode),
         )
         return EmergencyEventResult(
             eventId = response.getString("emergency_event_id"),
             state = response.getString("state"),
             idempotentReplay = response.getBoolean("idempotent_replay"),
+            aiNumber = response.optString("ai_number").takeIf(String::isNotBlank),
+            joinCode = response.optString("join_code").takeIf(String::isNotBlank),
         )
     }
 

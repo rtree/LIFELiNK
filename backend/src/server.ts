@@ -1,10 +1,11 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomInt, randomUUID } from "node:crypto";
 
 import formbody from "@fastify/formbody";
 import websocket from "@fastify/websocket";
 import { applicationDefault, getApps, initializeApp } from "firebase-admin/app";
-import { FieldValue, getFirestore } from "firebase-admin/firestore";
+import { FieldValue, Timestamp, getFirestore } from "firebase-admin/firestore";
 import Fastify from "fastify";
+import twilio from "twilio";
 import { z } from "zod";
 
 import { authenticate, requireHumanVerification } from "./auth.js";
@@ -13,6 +14,7 @@ import { notifyDiscordContacts, registerDiscordRoutes, relayCallTranscript } fro
 import {
   injectEmergencyUpdate,
   isValidTwilioRequest,
+  mediaStreamTwiml,
   placeEmergencyCall,
   registerMediaBridge,
 } from "./voice.js";
@@ -96,6 +98,7 @@ registerMediaBridge(app, async (eventId, callSid) => {
     motionState: location?.motion_state ?? null,
     motionPeakG: location?.motion_peak_g ?? null,
     initialNote: (event.get("initial_note") as string | null) ?? null,
+    carrierConference: event.get("mode") === "carrier_conference",
   };
 }, (eventId, speaker, text) => relayCallTranscript(db, app.log, eventId, speaker, text));
 
@@ -154,7 +157,23 @@ const emergencyEventSchema = z.object({
     })
     .nullable(),
   initial_note: z.string().max(1000).nullable(),
+  mode: z.enum(["outbound", "carrier_conference"]).default("outbound"),
 });
+
+const JOIN_CODE_TTL_MS = 10 * 60 * 1000;
+
+function hashJoinCode(code: string): string {
+  return createHash("sha256").update(code).digest("hex");
+}
+
+function issueJoinCode() {
+  const code = randomInt(0, 1_000_000).toString().padStart(6, "0");
+  return {
+    code,
+    hash: hashJoinCode(code),
+    expiresAt: Timestamp.fromMillis(Date.now() + JOIN_CODE_TTL_MS),
+  };
+}
 
 const emergencyUpdateSchema = z.discriminatedUnion("type", [
   z.object({
@@ -287,6 +306,12 @@ app.post(
       .collection("emergency_events")
       .doc(parsed.data.emergency_event_id);
 
+    const carrierConference = parsed.data.mode === "carrier_conference";
+    if (carrierConference && !config.TWILIO_AI_INBOUND_NUMBER) {
+      return reply.code(503).send({ error: "carrier_conference_unavailable" });
+    }
+    const joinCode = carrierConference ? issueJoinCode() : null;
+
     const result = await db.runTransaction(async (transaction) => {
       const [contact, existingEvent] = await Promise.all([
         transaction.get(contactRef),
@@ -301,10 +326,21 @@ app.post(
         if (existingEvent.get("uid") !== request.user.uid) {
           return { outcome: "event_id_conflict" as const };
         }
-        return {
-          outcome: "existing" as const,
-          state: existingEvent.get("state") as string,
-        };
+        const state = existingEvent.get("state") as string;
+        // The code is only stored hashed, so a retried request gets a fresh one while unused.
+        const reissue =
+          joinCode !== null &&
+          existingEvent.get("mode") === "carrier_conference" &&
+          state === "accepted" &&
+          !existingEvent.get("join_used_at");
+        if (reissue) {
+          transaction.update(eventRef, {
+            join_code_hash: joinCode.hash,
+            join_expires_at: joinCode.expiresAt,
+            updated_at: FieldValue.serverTimestamp(),
+          });
+        }
+        return { outcome: "existing" as const, state, reissued: reissue };
       }
 
       transaction.create(eventRef, {
@@ -317,6 +353,14 @@ app.post(
             ? (parsed.data.trigger_source ?? "beacon")
             : null,
         state: "accepted",
+        mode: parsed.data.mode,
+        ...(joinCode
+          ? {
+              join_code_hash: joinCode.hash,
+              join_expires_at: joinCode.expiresAt,
+              join_used_at: null,
+            }
+          : {}),
         location_snapshot: parsed.data.location_snapshot
           ? sanitizeLocationForPersistence(parsed.data.location_snapshot)
           : null,
@@ -328,6 +372,7 @@ app.post(
         outcome: "created" as const,
         state: "accepted",
         destination: contact.get("phone_e164") as string,
+        reissued: joinCode !== null,
       };
     });
 
@@ -347,6 +392,9 @@ app.post(
         capturedAt: snapshot?.captured_at ?? null,
         note: parsed.data.initial_note ?? null,
       }).catch((error) => app.log.error({ error }, "Discord notification failed"));
+    }
+
+    if (result.outcome === "created" && !carrierConference) {
       try {
         const callSid = await placeEmergencyCall(
           parsed.data.emergency_event_id,
@@ -376,6 +424,13 @@ app.post(
       emergency_event_id: parsed.data.emergency_event_id,
       state: result.state,
       idempotent_replay: result.outcome === "existing",
+      ...(joinCode && result.reissued
+        ? {
+            ai_number: config.TWILIO_AI_INBOUND_NUMBER,
+            join_code: joinCode.code,
+            join_expires_at: joinCode.expiresAt.toDate().toISOString(),
+          }
+        : {}),
     });
   },
 );
@@ -457,6 +512,24 @@ app.get(
     if (!event.exists || event.get("uid") !== request.user.uid) {
       return reply.code(404).send({ error: "emergency_event_not_found" });
     }
+    const expiresAt = event.get("join_expires_at") as Timestamp | undefined;
+    if (
+      event.get("mode") === "carrier_conference" &&
+      event.get("state") === "accepted" &&
+      expiresAt &&
+      expiresAt.toMillis() < Date.now()
+    ) {
+      await event.ref.update({
+        state: "failed",
+        failure_code: "join_code_expired",
+        updated_at: FieldValue.serverTimestamp(),
+      });
+      return reply.send({
+        emergency_event_id: event.id,
+        state: "failed",
+        failure_code: "join_code_expired",
+      });
+    }
     return reply.send({
       emergency_event_id: event.id,
       state: event.get("state") as string,
@@ -531,6 +604,120 @@ app.post("/v1/twilio/stream-status", async (request, reply) => {
     },
     "Twilio Media Stream status",
   );
+  return reply.code(204).send();
+});
+
+function sendTwiml(reply: import("fastify").FastifyReply, twiml: string) {
+  return reply.type("text/xml").send(twiml);
+}
+
+function hangupTwiml(): string {
+  const response = new twilio.twiml.VoiceResponse();
+  response.hangup();
+  return response.toString();
+}
+
+app.post("/v1/twilio/inbound", async (request, reply) => {
+  if (!isValidTwilioRequest(request)) {
+    return reply.code(403).send({ error: "invalid_twilio_signature" });
+  }
+  const body = request.body as { CallSid?: string; To?: string };
+  if (!config.TWILIO_AI_INBOUND_NUMBER || body.To !== config.TWILIO_AI_INBOUND_NUMBER) {
+    return sendTwiml(reply, hangupTwiml());
+  }
+  const response = new twilio.twiml.VoiceResponse();
+  const gather = response.gather({
+    input: ["dtmf"],
+    numDigits: 6,
+    timeout: 15,
+    action: `${config.BACKEND_URL}/v1/twilio/inbound/join`,
+    method: "POST",
+  });
+  gather.say({ voice: "Polly.Joanna" }, "LIFELiNK. Enter your code.");
+  response.hangup();
+  app.log.info({ callSid: body.CallSid ?? null }, "AI inbound call awaiting join code");
+  return sendTwiml(reply, response.toString());
+});
+
+app.post("/v1/twilio/inbound/join", async (request, reply) => {
+  if (!isValidTwilioRequest(request)) {
+    return reply.code(403).send({ error: "invalid_twilio_signature" });
+  }
+  const body = request.body as { CallSid?: string; Digits?: string; To?: string };
+  if (
+    !body.CallSid ||
+    !body.Digits ||
+    !/^\d{6}$/.test(body.Digits) ||
+    body.To !== config.TWILIO_AI_INBOUND_NUMBER
+  ) {
+    app.log.warn({ callSid: body.CallSid ?? null }, "AI inbound join rejected: malformed");
+    return sendTwiml(reply, hangupTwiml());
+  }
+  const callSid = body.CallSid;
+  const candidates = await db
+    .collection("emergency_events")
+    .where("join_code_hash", "==", hashJoinCode(body.Digits))
+    .limit(2)
+    .get();
+  const eventId = candidates.size === 1 ? (candidates.docs[0]?.id ?? null) : null;
+  const bound = eventId
+    ? await db.runTransaction(async (transaction) => {
+        const eventRef = db.collection("emergency_events").doc(eventId);
+        const event = await transaction.get(eventRef);
+        const expiresAt = event.get("join_expires_at") as Timestamp | undefined;
+        if (
+          !event.exists ||
+          event.get("mode") !== "carrier_conference" ||
+          event.get("state") !== "accepted" ||
+          event.get("join_used_at") ||
+          event.get("twilio_call_sid") ||
+          !expiresAt ||
+          expiresAt.toMillis() < Date.now()
+        ) {
+          return false;
+        }
+        transaction.update(eventRef, {
+          join_used_at: FieldValue.serverTimestamp(),
+          twilio_call_sid: callSid,
+          state: "in_progress",
+          updated_at: FieldValue.serverTimestamp(),
+        });
+        return true;
+      })
+    : false;
+  if (!bound || !eventId) {
+    app.log.warn({ callSid, matches: candidates.size }, "AI inbound join rejected");
+    return sendTwiml(reply, hangupTwiml());
+  }
+  app.log.info({ callSid, emergencyEventId: eventId }, "AI inbound call joined event");
+  return sendTwiml(reply, mediaStreamTwiml(eventId));
+});
+
+app.post("/v1/twilio/inbound/status", async (request, reply) => {
+  if (!isValidTwilioRequest(request)) {
+    return reply.code(403).send({ error: "invalid_twilio_signature" });
+  }
+  const body = request.body as { CallSid?: string; CallStatus?: string };
+  const ended = new Set(["completed", "busy", "failed", "no-answer", "canceled"]);
+  if (!body.CallSid || !body.CallStatus || !ended.has(body.CallStatus)) {
+    return reply.code(204).send();
+  }
+  const events = await db
+    .collection("emergency_events")
+    .where("twilio_call_sid", "==", body.CallSid)
+    .limit(1)
+    .get();
+  const event = events.docs[0];
+  if (event && event.get("mode") === "carrier_conference") {
+    await event.ref.update({
+      state: "completed",
+      updated_at: FieldValue.serverTimestamp(),
+    });
+    app.log.info(
+      { callSid: body.CallSid, emergencyEventId: event.id, callStatus: body.CallStatus },
+      "AI inbound call ended",
+    );
+  }
   return reply.code(204).send();
 });
 

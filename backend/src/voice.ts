@@ -15,6 +15,7 @@ type InitialContext = {
   motionState: string | null;
   motionPeakG: number | null;
   initialNote: string | null;
+  carrierConference: boolean;
 };
 
 type TwilioStartMessage = {
@@ -100,25 +101,28 @@ function requireVoiceConfig() {
   };
 }
 
-export async function placeEmergencyCall(
-  emergencyEventId: string,
-  destination: string,
-): Promise<string> {
-  const voiceConfig = requireVoiceConfig();
+export function mediaStreamTwiml(emergencyEventId: string): string {
   const response = new twilio.twiml.VoiceResponse();
   const stream = response.connect().stream({
     statusCallback: `${config.BACKEND_URL}/v1/twilio/stream-status?emergencyEventId=${encodeURIComponent(emergencyEventId)}`,
     url: config.BACKEND_URL.replace(/^https:/, "wss:") + "/v1/twilio/media",
   });
   stream.parameter({ name: "emergencyEventId", value: emergencyEventId });
+  return response.toString();
+}
 
+export async function placeEmergencyCall(
+  emergencyEventId: string,
+  destination: string,
+): Promise<string> {
+  const voiceConfig = requireVoiceConfig();
   const call = await twilio(voiceConfig.accountSid, voiceConfig.authToken).calls.create({
     from: voiceConfig.fromNumber,
     statusCallback: `${config.BACKEND_URL}/v1/twilio/status?emergencyEventId=${encodeURIComponent(emergencyEventId)}`,
     statusCallbackEvent: ["initiated", "ringing", "answered", "completed"],
     statusCallbackMethod: "POST",
     to: destination,
-    twiml: response.toString(),
+    twiml: mediaStreamTwiml(emergencyEventId),
   });
   return call.sid;
 }
@@ -155,7 +159,10 @@ function buildInitialMessage(context: InitialContext): string {
   // spoken on purpose: it conveys how trustworthy the area is without locating
   // the person.
   const lines = [
-    "This is an automated call from the LIFELiNK emergency app.",
+    context.carrierConference
+      ? "This is the LIFELiNK emergency AI joining this call. The person who pressed SOS " +
+        "is on this call, and their trusted contact may be on it too."
+      : "This is an automated call from the LIFELiNK emergency app.",
     context.address
       ? `The person is somewhere around ${context.address}.`
       : "Their area could not be determined.",

@@ -19,6 +19,7 @@ const configSchema = z.object({
   TWILIO_FROM_NUMBER: trimmedSecret(
     z.string().regex(/^\+[1-9]\d{7,14}$/),
   ).optional(),
+  TWILIO_AI_INBOUND_NUMBER: z.string().regex(/^\+[1-9]\d{7,14}$/).optional(),
   WORLD_ID_APP_ID: z.string().min(1).default("app_30fbdcf47be73f8a3603f0633b8aeb7c"),
   WORLD_ID_RP_ID: z.string().min(1).default("rp_f73bfaa54987b8ce"),
   WORLD_ID_ACTION: z.string().min(1).default("verify-emergency-caller"),
