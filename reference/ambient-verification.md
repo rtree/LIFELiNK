@@ -105,7 +105,8 @@ ssh beacon-host "$ADB logcat -s LIFELiNK.BeaconLog"
 - `emergency_events` / `updates` は維持。追加フィールドもコードより先に `doc/plan.md` で凍結する。旧データの移行・削除、8a 章の状況ストア導入をしない。
 - Firestore は backend Admin SDK だけが書く。UI は本物のドキュメントを購読し、モックを作らない。
 - Twilio の現行発信番号 `key-twilio-from-number`（SID `PN25e30a4c7e287953ff4ebce4d33c3771`）を勝手に変更しない。
-  **同じアカウントの別番号 +1629280xxxx は旧プロジェクト用。「使っていなさそう」だけでは転用しない。**
+  別番号 +1629280xxxx（SID `PNbe25648b5f32bd261cb3ac9039855fd3`）は **2026-09-26 にユーザー承認で AI 着信実験用へ転用済み**。
+  旧プロジェクトの Voice URL（`beacontest-backend-…/v1/twilio/incoming`）は外して空、FriendlyName は `LIFELiNK AI inbound (experimental)`。
 - gcloud/firebase は必ず `--project=ethglobaltokyo2026lifelink`。World ID の app/RP/action と鍵は変更しない。
 - 音声形式 `audio/pcmu`（G.711 μ-law / 8 kHz / mono）、英語の UI・AI・Discord、音声を永続化しない方針を維持する。
 

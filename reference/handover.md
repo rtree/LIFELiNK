@@ -20,7 +20,7 @@
 | Cloud Run は **`maxScale=1`** | 通話中の Realtime セッション表（`voice.ts`）と Discord 中継キュー（`discord.ts`）はインスタンス内メモリ。2 台以上になると通話中メモ・Discord 返信が AI に届かず、書き起こし中継も欠ける。性能改善のつもりでスケールさせない。直すなら Firestore 購読方式へ設計変更が先。 |
 | gcloud/firebase は**必ず `--project=ethglobaltokyo2026lifelink`** | ホストの `gcloud config` 既定は別プロジェクト（旧ハッカソンの `beacontesttokyo`）。付け忘れると無関係な資源を見て誤診する。 |
 | World ID の app/RP/action は**再作成しない** | `app_30fbdcf47be73f8a3603f0633b8aeb7c` / `rp_f73bfaa54987b8ce` / action `verify-emergency-caller`（production）は本番登録済み。作り直すと既存の証明・署名鍵が無効になる。鍵は Secret `key-world-id-rp-signing`。 |
-| Twilio の発信番号は Secret `key-twilio-from-number`（SID `PN25e30a4c7e287953ff4ebce4d33c3771`）**のみ** | 同一アカウントに旧プロジェクト用の番号（+1629280xxxx）も居る。そちらを触ると無関係な設定を壊す。 |
+| Twilio の発信番号は Secret `key-twilio-from-number`（SID `PN25e30a4c7e287953ff4ebce4d33c3771`）**のみ** | outbound の SOS はこの番号だけを使う。もう1本の +1629280xxxx（SID `PNbe25648b5f32bd261cb3ac9039855fd3`）は **2026-09-26 にユーザー承認で旧プロジェクトから LIFELiNK の AI 着信実験用へ転用**（P2-12〜16）。旧 Voice URL `https://beacontest-backend-998360239501.asia-northeast1.run.app/v1/twilio/incoming` (POST) を外し空にした。旧プロジェクトへ戻す必要は無いと確認済み。 |
 | Firestore への**書き込みは backend（Admin SDK）だけ** | クライアント書き込みは rules で全面拒否済み。Android から直接書く実装を足さない（読みは直接 OK。P1-16 のライブフィードが実際に直接 read している）。 |
 | **モック・ダミーデータを作らない** | `.github/copilot-instructions.md` の方針。UI は最初から本物の Firestore コレクションだけを読む。未実装は「準備中」と表示する。 |
 | P0 の `emergency_events`/`updates` の既存データを**移行・削除しない** | MVP 0.1 の実機検証の証跡。P2 は新規イベントから `emergencySessions` を使う。バックアップ: `gs://ethglobaltokyo2026lifelink-firestore-backups/mvp-0.1-2026-09-26`。 |

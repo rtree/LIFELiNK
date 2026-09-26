@@ -98,7 +98,7 @@ P2-09〜11 は独立録音の代替案として保留し、この電話実験の
 | P2-09 | TODO | `microphone` 種別の FGS を実装し、**画面 OFF・ロック中に実際に非無音の PCM が取れるかを実機で測る** | P2-08 | `reference/ambient-verification.md` 5 章のチェックリストを埋める。`AudioRecord.registerAudioRecordingCallback()` で `isClientSilenced()` を常に記録し、「録れている」と「送れている」を分けて計る |
 | P2-10 | TODO | 15 秒チャンクを backend へ POST し、`gpt-4o-mini-transcribe` の結果だけを `updates.type: "ambient"` へ保存する取り込みパス | P2-09 | 無音チャンク（RMS 閾値以下）は送らない。音声バイトは Firestore ・ログ・一時ファイルのどこにも残さない。**AI への注入は間引く**（意味が変わったときだけ・最短間隔あり）。さもないと通話が実況中継になる |
 | P2-11 | TODO | 非発話音（叫び声・ガラス・アラーム）を MediaPipe + YAMNet で端末内分類する | P2-10、時間が余った場合 | 追加コスト $0 で「Screaming」「Glass」等を同じ `ambient` へ書く。音声は端末から出ない |
-| P2-12 | TODO | キャリア会議実験の基準点・使用番号・inbound 契約を確定する（E0） | 手動3者通話は確認済み、番号用途と参加者の同意 | 番号の既存設定と復旧基準を確認。mode、認可済み pending event、期限付き一回照合、CallSid、終了、混合 transcript を plan に先に凍結。旧プロジェクト番号を無断転用しない |
+| P2-12 | IN PROGRESS | キャリア会議実験の基準点・使用番号・inbound 契約を確定する（E0） | 手動3者通話は確認済み、番号用途と参加者の同意 | **番号は確定**: `PNbe25648b5f32bd261cb3ac9039855fd3`（+1629280xxxx）をユーザー承認で転用し、旧 Voice URL を削除済み（2026-09-26）。残り: mode、認可済み pending event、期限付き一回照合、CallSid、終了、混合 transcript を plan に先に凍結 |
 | P2-13 | TODO | 既存 backend に実験イベント準備と AI 番号の着信 webhook を隔離追加する（E1） | P2-12 | 既存 outbound を勝手に発信せず実イベント／Discord を準備できる。不明着信拒否・署名／owner照合・一回 SID bind が機能し、旧 SOS の回帰なし。スケール数・DB移行は変更しない |
 | P2-14 | TODO | 標準 Samsung dialer の手動操作で AI 単独→連絡先追加→会議を確認する（E2/E3） | P2-13、同意済み実番号 | Galaxy／相手／AI の各方向・ロック後音声・同一イベントの transcript／Discord返信・終了を実確認。失敗ならここで止め、dialer 自動化へ進まない |
 | P2-15 | TODO | 最低限の実ダイアラー機能（約2画面＋α）と画面の実験 SOS を実装・実機確認する（E4） | P2-14 | role 取得／返却、番号入力／折返し、着信／通話 UI、発信・追加・統合・終了が動く。通常通話を壊さず callback で統合成功を判定。旧 Home SOS を保持 |
