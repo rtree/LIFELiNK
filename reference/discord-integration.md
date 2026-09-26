@@ -2,7 +2,7 @@
 
 ## 結論と実装順序
 
-電話と修正後 iBeacon 長押しの実機検証（P0-14a/P0-15）を完了した後、1 人の同意済み Discord ユーザーで「招待→本人確認/位置共有同意→Bot テスト DM→実電話イベントの DM→返信をイベントへ保存」を検証する。アプリ同士の Google/Firebase 友人リンクは将来の任意機能。Discord は電話の代わりではない。
+電話と修正後 iBeacon 長押しの実機 happy path（P0-14a/P0-15）は 2026-09-26 に完了。現在の **MVP 主線 P0-16〜P0-20** として、1 人の同意済み Discord ユーザーで「招待→本人確認/位置共有同意→Bot テスト DM→実電話イベントの DM→返信をイベントへ保存」を検証する。アプリ同士の Google/Firebase 友人リンクは将来の任意機能。Discord は電話の代わりではない。
 
 今回の小規模な開発では、通常の Discord Developer Portal アプリ/Bot 作成・Bot token・`identify` OAuth2・HTTP Interactions へのアクセスについて、Discord 側の KYC、事前審査、有料 API キー申請は公式の通常手順には記載されていない。ただし Discord 全友人一覧の `relationships.read` は Social SDK への申請が必要であり、今回使わない。大量展開での審査・ポリシー適合性は別問題。[公式 Bot 入門](https://docs.discord.com/developers/quick-start/getting-started) / [OAuth scopes](https://docs.discord.com/developers/topics/oauth2#shared-resources-oauth2-scopes) / [特権 Intent 審査](https://docs.discord.com/developers/gateway/getting-started-with-privileged-intent-review)
 
@@ -36,4 +36,4 @@
 
 ## 未実施のもの
 
-この文書は公開公式資料と現行設計の整理、および上記の **Secret メタデータ確認**の記録。Secret の内容・Discord API 接続・DM 到達・受信同意は未検証。P0-14a/P0-15 終了後に既存の `emergency_events`/`updates` を用いた実データの縦断試験を開始する。実装と schema を決める前には `doc/plan.md` を先に更新する。
+この文書は公開公式資料と現行設計の整理、および上記の **Secret メタデータ確認**の記録。Secret の内容・Discord API 接続・DM 到達・受信同意は未検証。P0-14a/P0-15 は通過済みで、P0-16 から実装と schema を `doc/plan.md` に先に確定し、既存の `emergency_events`/`updates` を用いた実データの縦断試験に進む。
