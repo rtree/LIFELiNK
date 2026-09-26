@@ -320,9 +320,9 @@ class BeaconReceiver : BroadcastReceiver() {
             ).orEmpty()
         }
 
-        const val MAX_ADVERTISEMENT_AGE_NANOS = 10_000_000_000L
     private companion object {
         const val LOG_TAG = "LIFELiNK.Beacon"
+        const val MAX_ADVERTISEMENT_AGE_NANOS = 10_000_000_000L
         val TERMINAL_EVENT_STATES = setOf("completed", "failed")
     }
 }
