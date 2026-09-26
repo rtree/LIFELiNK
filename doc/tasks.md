@@ -54,37 +54,21 @@ P0-15 は電話/iBeacon の **happy path** の通過点であり、製品全体�
 
 注記: P0-13（通話中メモ・位置更新）を実装する際は、`updates` ドキュメントのフィールド名を `doc/plan.md` 6a 章の拡張スキーマ（`type`、`author_type`、`author_uid` などを含む）に合わせること。P1 での friend_comment / transcript 追加時にフィールド追加のみで済ませるため。
 
-## P1: 実通話成立後
+## P1: MVP 0.1 の次（提出までの主線、上から実行順）
 
-**2026-09-26 優先順位更新**: **P0-15 実機完了済み → Discord 個別 DM の主線（P0-16〜P0-20）→ P2 最小書き込みパス（P2-01/P2-02）→ Full UI と delegations を並行**。Discord 検証は既存の本物の `emergency_events`/`updates` を使い、P2 の完成を待たず、モックも作らない。P2 スキーマ変更時はコードより先に `doc/plan.md` を更新。Discord が相手の同意や DM 配信条件で詰まれば実測した失敗を記録し、電話+iBeacon の動く主線を守る。
+MVP 主線（P0-01〜P0-21）は完了し `mvp-0.1` として保全済み。ここからは **P1-16 → P1-17 → P2-07 → P1-18 → P1-19** の順に進める（`doc/plan.md` 1a 章の実行順序決定、残り時間目安 10 時間）。英語化は専用フェーズを設けず、P1-16 以降で触る画面から順に英語へ寄せる。
 
-**2026-09-26 追加（人間確認済み、残り時間目安 10 時間）**: MVP 0.1（`mvp-0.1` タグ、`reference/mvp0.1.md`）到達後の次の実行順は **P1-16（チャット UI）→ 英語化/B2C UI 整形（以後触る画面から段階的に、専用タスクは立てない）→ P2-07（周辺情報蓄積、P2 完了後）→ P1-17/P1-18（World ID 再認証・解除・Passport/Selfie）**。
-
-| ID | 状態 | タスク | 依存 | 完了条件 |
-| --- | --- | --- | --- | --- |
-| P1-16 | TODO | Android に緊急イベントのチャット風ライブ表示画面を実装する。`emergency_events/{id}/updates` を時系列購読し、`note`/`location`/`transcript_contact`/`transcript_ai`/`friend_comment`/`system` を種類ごとに整形して表示する（Discord チャンネル風または WhatsApp 風、uimock のテイストに近い方を採用） | P0-20（Discord 縦断確認済み） | 実際の緊急イベントで、通話の書き起こしと Discord 友人からの返信が届いた順にアプリ内へ表示される。ダミーデータは使わない。P2 移行後に購読先を `timeline` へ切り替えられるよう整形ロジックをデータ源から分離する |
-| P1-17 | TODO | World ID の再認証・認証解除の設定画面と API を実装する（`backend/src/worldid.ts` に追加、`server.ts`/`config.ts`/`discord.ts` には触れない） | P1-16、Discord 主線が一段落していること | 認証切れ・失効後に設定画面から再認証でき、認証解除操作で `human_verified` claim が外れて緊急発信が再びブロックされることを実機で確認する |
-| P1-18 | TODO | IDKit の `credential_types` に Passport/Selfie Check を追加する | P1-17 | Proof of Human に加えて Passport または Selfie Check でも認証が成立し、`human_verified` claim が同様に付与される |
+**欠番（2026-09-26 整理）**: P1-02〜P1-06 と P1-08〜P1-15 は優先度最低のストレッチゴールとして **PX セクションへ移動**（PX-01〜PX-13）。P1-07（Android 周辺音声）は内容が重複するため **P2-07 へ統合**。これらの P1 番号は再利用せず欠番のままにする。
 
 | ID | 状態 | タスク | 依存 | 完了条件 |
 | --- | --- | --- | --- | --- |
-| P1-01 | TODO | 通話録音/書き起こし共有の可否を別途決める。アプリ同士の友人リンクは将来の任意機能に延期済み | P0-20、同意/保持期間の判断 | 録音の有無・公開範囲を `doc/plan.md` に記録。Discord DM の実装を妨げない |
-| P1-02 | TODO | 【将来・提出スコープ外】LIFELiNK アプリ同士の友人リンクが Discord で代替できないか再評価し、必要な場合だけ `friend_links`・相互承認 API を設計/実装する | P0-20 と将来の再判断 | 採用すると決めた場合に限り、本人確認を伴う相互リンクが成立。今回の Discord 検証・P2・Full UI を待たせない |
-| P1-03 | TODO | 【将来・提出スコープ外】アプリ内友人リンクを採用する場合のみ `emergencySessions.participant_uids` に承認済み Firebase UID をスナップショットする | P1-02 を実装すると決めた場合 | 後から友人になった uid に過去イベントを公開せず、Discord ID を UID と混同しない |
-| P1-04 | TODO | 【将来・提出スコープ外】アプリ内友人のコメントを `timeline` に追加する。Discord モーダル返信の保存は P0-19 と P2-01/P2-02 で別途実施 | P1-03 と P2-02 | アプリ内友人がコメントできる（Discord 返信はこのタスクを待たない） |
-| P1-05 | TODO | 【将来・提出スコープ外】第三者返信を Realtime の通話中 AI に注入するか同意を確認し、採用時のみ実装する | Discord/アプリ内の返信保存と P2-05、追加同意 | 第三者情報として出典を区別し、無断の音声読み上げをしない |
-| P1-06 | TODO | 【将来・提出スコープ外】LIFELiNK 同士の友人用ライブ共有 UI を必要になった場合のみ実装する。Discord DM 受信・返信の完成とは独立 | P1-02〜P1-04 を採用すると決めた場合 | 本物の `facts`/`timeline` に接続し、未実装時はダミーを表示せず「準備中」と表示 |
-| P1-06a | TODO | `users/{uid}` へ `nickname`/`area` フィールドを追加し、プロフィール設定画面（モック 1-5）を実装する | P0-15 | ニックネームとエリアを保存・再取得でき、エリアを住所表示や連絡先の文脈情報に利用できる |
+| P1-16 | TODO | Android に緊急イベントのチャット風ライブ表示画面を実装する。`emergency_events/{id}/updates` を時系列購読し、`note`/`location`/`transcript_contact`/`transcript_ai`/`friend_comment`/`system` を種類ごとに整形して表示する（Discord チャンネル風または WhatsApp 風、uimock のテイストに近い方を採用） | P0-21（MVP 0.1 保全済み） | 実際の緊急イベントで、通話の書き起こしと Discord 友人からの返信が届いた順にアプリ内へ表示される。ダミーデータは使わない。P2 移行後に購読先を `timeline` へ切り替えられるよう整形ロジックをデータ源から分離する |
+| P1-17 | TODO | 英語化と B2C 向け UI 整形を段階的に進める（専用フェーズは設けず、P1-16 以降で触る画面から順に文言・配色・導線を整える） | P1-16 | 触れた画面から順に英語表示になり、検証用 1 画面 UI ではなく一般利用者向けの体裁になっている。未実装機能はダミーではなく「準備中」と表示する |
+| P1-18 | TODO | World ID の再認証・認証解除の設定画面と API を実装する（`backend/src/worldid.ts` に追加） | P2-07 完了後（`doc/plan.md` 1a 章の実行順序） | 認証切れ・失効後に設定画面から再認証でき、認証解除操作で `human_verified` claim が外れて緊急発信が再びブロックされることを実機で確認する |
+| P1-19 | TODO | IDKit の `credential_types` に Passport/Selfie Check を追加する | P1-18 | Proof of Human に加えて Passport または Selfie Check でも認証が成立し、`human_verified` claim が同様に付与される |
+| P1-01 | DONE | 通話録音/書き起こし共有の可否を決める | P0-20、同意/保持期間の判断 | 2026-09-26 決定・実装済み: 音声ファイルは録音・保存しない。通話の書き起こしのみ、同じイベントで DM 済みの同意済み Discord 受信者へ逐次中継する（`doc/plan.md` 4a 章「通話内容のリアルタイム共有」、実装 `25d9352`）。電話の相手への共有告知はデモのため入れず、製品化時に再検討する |
+| P1-06a | TODO | `users/{uid}` へ `nickname`/`area` フィールドを追加し、プロフィール設定画面（モック 1-5）を実装する | P1-16 | ニックネームとエリアを保存・再取得でき、エリアを住所表示や連絡先の文脈情報に利用できる |
 | P1-06b | TODO | 端末ローカルの 2 段階音声アナウンス（送信時 stage1・接続時 stage2、JP/EN/両方、Silent SOS トグル）を実装する | P0-09、P0-13（`in-progress`/`answered` を判定する Twilio status） | 送信直後に stage1 が即時発話され、Twilio status が `answered`/`in-progress` を報告した時だけ stage2 が発話される。Silent SOS 有効時は両方無音になる |
-| P1-07 | TODO | Android 周辺音声の扱いを設計・実装する | P0-15、同意・法務判断 | 明示同意と状態表示のもとで音声を通話へ追加可能 |
-| P1-08 | TODO | 【ストレッチゴール・最優先度は最低】GATT 統合前の決定事項（`doc/plan.md` 13 章）を人間と確定する（minSdk/対象 Samsung 機種、firmware MAC 方式、Beacon 広告への event identity 同居可否、location FGS 採用有無、Companion Device/battery optimization の Play policy 方針、2 時間後の停止方針） | P0-15 完了（Beacon 完動）、Discord/Full UI/P2/P3 が片付き時間が余った場合のみ着手 | 決定を `doc/plan.md` 6c 章・13 章に反映済み |
-| P1-09 | TODO | 【ストレッチゴール・最優先度は最低】`ble-core`: GATT/Beacon 共通の protocol parser、`connectionGeneration`、状態 reducer、重複排除を実装する（Android API 非依存、unit test 付き） | P1-08 | epoch/eventId/generation の妥当性判定が unit test で再現できる |
-| P1-10 | TODO | 【ストレッチゴール・最優先度は最低】`gatt-android`: `GattController` と直列化された GATT operation queue を実装する（Service/UI/backend に依存しない） | P1-09 | service discovery→CCCD write→`READY` が一つの owner・一つの `BluetoothGatt` で完結する |
-| P1-11 | TODO | 【ストレッチゴール・最優先度は最低】`monitoring-service`: `connectedDevice` FGS、常駐通知、`PARTIAL_WAKE_LOCK`、2 時間の session deadline、共通停止 path を実装する | P1-10 | 6c 章の停止手順（generation 無効化→disarm→scan 停止→GATT close→WakeLock 解放→stopSelf）を満たす |
-| P1-12 | TODO | 【ストレッチゴール・最優先度は最低】`companion-android`: Companion Device association/presence を feature flag 付きで実装する（採用条件を満たす場合のみ有効化） | P1-11 | presence 復帰時に `MonitoringService` へ再接続契機が渡り、Companion 側は GATT/arm を生成しない |
-| P1-13 | TODO | 【ストレッチゴール・最優先度は最低】`firmware`: `firmware/xiao_gatt_button/` に address 方針、advertising 再開、Notify/ACK、event identity を実装する | P1-08、host のツールチェーン（`doc/host-setup.md`） | 6b/6c 章のプロトコル（17/16 byte, big-endian, epoch/eventId 単調増加）を満たす |
-| P1-14 | TODO | 【ストレッチゴール・最優先度は最低】`device-test`: adb ハーネスとログ収集で 6c 章の実機試験 matrix・シナリオ・合格指標を実施する | P1-09〜P1-13 | `READY` 時間率・押下受信率・再接続時間が観測値として記録され、初期合格案を満たすか判定できる |
-| P1-15 | TODO | 【ストレッチゴール・最優先度は最低】GATT 経路を `trigger_source: gatt` として Safety gate へ接続し、Beacon へのフォールバックを実装する | P1-09〜P1-14 | `CONNECTED -> SUBSCRIBED -> READY` を維持し、長押し一回が Notify 一回・受信一回・ACK 一回になる。GATT 不通時は Beacon 経路にフォールバックする |
 
 ## P2: GPT Live 状況ストアと Responses delegation
 
@@ -92,7 +76,7 @@ P0-15 は電話/iBeacon の **happy path** の通過点であり、製品全体�
 
 | ID | 状態 | タスク | 依存 | 完了条件 |
 | --- | --- | --- | --- | --- |
-| P2-01 | TODO | `situationStore.ts`: `facts` の append・`state/current` の materialization・`sequence` 採番・認可を実装する（ルート直下の `emergencySessions/{session_id}` 配下。`participant_uids` のスナップショット生成はこのタスク自体で実装し、P1-02 を待たない）。Discord 返信の `friend_reply` 移行先も確認する | P0-20 | Android/Discord の fact が一度だけ保存され、`state/current` の `version` が単調増加する |
+| P2-01 | TODO | `situationStore.ts`: `facts` の append・`state/current` の materialization・`sequence` 採番・認可を実装する（ルート直下の `emergencySessions/{session_id}` 配下。`participant_uids` のスナップショット生成はこのタスク自体で実装し、PX-01 を待たない）。Discord 返信の `friend_reply` 移行先も確認する | P0-21 | Android/Discord の fact が一度だけ保存され、`state/current` の `version` が単調増加する |
 | P2-02 | TODO | `timelineStore.ts`: `timeline` への transcript/UI 履歴書き込みを実装する（8a 章の `delivery` 状態遷移を含む） | P2-01 | 割り込み時に `conversation.item.truncate` と連動して `interrupted` が記録される |
 | P2-03 | TODO | `realtimeTools.ts`: `get_current_situation`/`get_session_history` の同期 tool と routing 規則を実装する | P2-01、P2-02 | 「今どこ」「さっき何と言ったか」に根拠 `fact_id` 付きで即答できる |
 | P2-04 | TODO | `delegationStore.ts` + `responsesDelegate.ts`: `delegate_investigation` の非同期委譲（`background: true`、poll、`call_id` 冪等化）を実装する | P2-03 | 保留発話が一回だけ発話され、Responses 完了後に同じ通話へ結果が音声で返る |
@@ -111,9 +95,36 @@ P0-15 は電話/iBeacon の **happy path** の通過点であり、製品全体�
 | P3-03 | TODO | 画面 OFF 直後の受信空白（2026-09-26 11:50 に 38 秒、別の回は 0.6 秒）を定量化する: (1) adb で画面 OFF/ON を 10 回自動反復し待機スロットの受信間隔を集計、(2) 空白の中と外で人が押下して取りこぼしを確認、(3) 画面 OFF/ON と受信再開ギャップをアプリ内ログに残し USB 非接続でも測る、(4) 画面 OFF 時のスキャン再登録で空白が消えるか試す | P0-15 | 空白の発生率・長さ・条件（USB 充電有無含む）と対策の効果が `doc/plan.md` 6b 章に記録され、送信時間 10 秒を維持するか判断できる |
 | P3-04 | TODO | ボタンの死活表示: 待機スロットの最終受信時刻を常駐通知と画面に出し、一定時間未受信で「ボタンが見つかりません（範囲外・電池切れ・停止中 IDLE の可能性）」、電池低下 bit で「電池交換」を警告する。初期設定に「RUNNING・ボタン検知モード・送信時間 10 秒」の確認項目を追加する | P3-03（警告しきい値の根拠） | IDLE 化・電池抜き・範囲外で警告が出て、復帰で消えることを実機確認 |
 
+## PX: ストレッチゴール（優先度は最低・提出スコープ外）
+
+提出までの主線（P1）・P2・P3 がすべて片付き、それでも時間が余った場合にだけ着手する。**着手しないまま提出することを前提に計画する**。2026-09-26 に旧 P1-02〜P1-06（アプリ同士の友人リンク）と旧 P1-08〜P1-15（GATT）をここへ移した。旧番号は欠番のまま再利用しない。
+
+| ID | 旧 ID | 状態 | タスク | 依存 | 完了条件 |
+| --- | --- | --- | --- | --- | --- |
+| PX-01 | P1-02 | TODO | LIFELiNK アプリ同士の友人リンクが Discord で代替できないか再評価し、必要な場合だけ `friend_links`・相互承認 API を設計/実装する | 将来の再判断 | 採用すると決めた場合に限り、本人確認を伴う相互リンクが成立。P1・P2 を待たせない |
+| PX-02 | P1-03 | TODO | アプリ内友人リンクを採用する場合のみ `emergencySessions.participant_uids` に承認済み Firebase UID をスナップショットする | PX-01 を実装すると決めた場合 | 後から友人になった uid に過去イベントを公開せず、Discord ID を UID と混同しない |
+| PX-03 | P1-04 | TODO | アプリ内友人のコメントを `timeline` に追加する（Discord モーダル返信の保存は P0-19 で実装済み） | PX-02 と P2-02 | アプリ内友人がコメントできる |
+| PX-04 | P1-05 | TODO | アプリ内友人の返信を Realtime の通話中 AI に注入する（Discord 返信の AI 注入は P0-19 で実装済み） | PX-03、P2-05、追加同意 | 第三者情報として出典を区別し、無断の音声読み上げをしない |
+| PX-05 | P1-06 | TODO | LIFELiNK 同士の友人用ライブ共有 UI を実装する（自分のアプリ内チャット UI は P1-16 で別途実装する） | PX-01〜PX-03 を採用すると決めた場合 | 本物の `facts`/`timeline` に接続し、未実装時はダミーを表示せず「準備中」と表示 |
+| PX-06 | P1-08 | TODO | GATT 統合前の決定事項（`doc/plan.md` 13 章）を人間と確定する（minSdk/対象 Samsung 機種、firmware MAC 方式、Beacon 広告への event identity 同居可否、location FGS 採用有無、Companion Device/battery optimization の Play policy 方針、2 時間後の停止方針） | P1・P2・P3 完了後に時間が余った場合のみ | 決定を `doc/plan.md` 6c 章・13 章に反映済み |
+| PX-07 | P1-09 | TODO | `ble-core`: GATT/Beacon 共通の protocol parser、`connectionGeneration`、状態 reducer、重複排除を実装する（Android API 非依存、unit test 付き） | PX-06 | epoch/eventId/generation の妥当性判定が unit test で再現できる |
+| PX-08 | P1-10 | TODO | `gatt-android`: `GattController` と直列化された GATT operation queue を実装する（Service/UI/backend に依存しない） | PX-07 | service discovery→CCCD write→`READY` が一つの owner・一つの `BluetoothGatt` で完結する |
+| PX-09 | P1-11 | TODO | `monitoring-service`: `connectedDevice` FGS、常駐通知、`PARTIAL_WAKE_LOCK`、2 時間の session deadline、共通停止 path を実装する | PX-08 | 6c 章の停止手順（generation 無効化→disarm→scan 停止→GATT close→WakeLock 解放→stopSelf）を満たす |
+| PX-10 | P1-12 | TODO | `companion-android`: Companion Device association/presence を feature flag 付きで実装する（採用条件を満たす場合のみ有効化） | PX-09 | presence 復帰時に `MonitoringService` へ再接続契機が渡り、Companion 側は GATT/arm を生成しない |
+| PX-11 | P1-13 | TODO | `firmware`: `firmware/xiao_gatt_button/` に address 方針、advertising 再開、Notify/ACK、event identity を実装する | PX-06、host のツールチェーン（`doc/host-setup.md`） | 6b/6c 章のプロトコル（17/16 byte, big-endian, epoch/eventId 単調増加）を満たす |
+| PX-12 | P1-14 | TODO | `device-test`: adb ハーネスとログ収集で 6c 章の実機試験 matrix・シナリオ・合格指標を実施する | PX-07〜PX-11 | `READY` 時間率・押下受信率・再接続時間が観測値として記録され、初期合格案を満たすか判定できる |
+| PX-13 | P1-15 | TODO | GATT 経路を `trigger_source: gatt` として Safety gate へ接続し、Beacon へのフォールバックを実装する | PX-07〜PX-12 | `CONNECTED -> SUBSCRIBED -> READY` を維持し、長押し一回が Notify 一回・受信一回・ACK 一回になる。GATT 不通時は Beacon 経路にフォールバックする |
+
 ## 次のアクション
 
-**2026-09-26 時点で MVP 主線（P0-01〜P0-21）は完了し、MVP 0.1 として保全済み**（`reference/mvp0.1.md`、タグ `mvp-0.1`、Firestore export `gs://ethglobaltokyo2026lifelink-firestore-backups/mvp-0.1-2026-09-26`）。壊れたらここへ戻る。失敗系の網羅と長時間ロックは P3。
+**2026-09-26 時点で MVP 主線（P0-01〜P0-21）は完了し、MVP 0.1 として保全済み**（`reference/mvp0.1.md`、タグ `mvp-0.1`、Firestore export `gs://ethglobaltokyo2026lifelink-firestore-backups/mvp-0.1-2026-09-26`）。壊れたらここへ戻る。
 
-1. Discord/電話の細かい改善点を洗い出して次段のタスクにする。
-2. P2 最小パスと Full UI へ進む（リファクタリング時は `reference/mvp0.1.md` の「既知の制約」、特に `maxScale=1` 前提に注意）。Google 同士のアプリ内友人リンク、GATT、録音は別途判断。
+ここからの実行順（`doc/plan.md` 1a 章の決定、残り時間目安 10 時間）:
+
+1. **P1-16**: アプリ内チャット風ライブ表示（`emergency_events/{id}/updates` を直接購読、新スキーマなし）。
+2. **P1-17**: 触る画面から段階的に英語化・B2C 向け UI 整形。
+3. **P2-01/P2-02 → P2-07**: P2 最小書き込みパスを通してから周辺情報蓄積（`ambient_observation`）。
+4. **P1-18 → P1-19**: World ID 再認証・解除、Passport/Selfie 対応。
+5. P3（失敗系・長時間ロック）はこの後。PX（アプリ内友人リンク、GATT）は時間が余った場合のみ。
+
+リファクタリング時は `reference/mvp0.1.md` の「既知の制約」、特に `maxScale=1` 前提に注意する。

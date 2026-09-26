@@ -1069,14 +1069,25 @@ Android fact が Firestore へ一度だけ保存され `state/current` へ反映
 - 2026-09-26: 短押し/待機では発信 0、長押し 1 回でイベント 1 件・実通話 1 件を確認。失敗系の網羅と長時間ロック試験は P3 へ分離。
 - 完了条件: 長押し一回が Android で一回の有効イベントとなり、同意済み相手へ実通話できる（達成済み）。
 
-### Phase 6: Discord 個別連絡の MVP 主線（P0-16〜P0-20、未完了）
+### Phase 6: Discord 個別連絡の MVP 主線（P0-16〜P0-21、完了済み）
 
-- P0-14a/P0-15 の後に、相手の opt-in 招待・本人確認、Bot テスト DM、実電話イベントと並行した一度だけの DM、モーダル返信のイベント保存を実アカウントで検証する。
-- 電話/iBeacon は主経路として維持し、Discord 障害は非致命的な配送失敗として表示する。Full UI、周辺音声、GATT は縦断確認後に優先度を再判断し、アプリ同士の友人リンクは将来の任意機能に残す。
+- 相手の opt-in 招待・本人確認、Bot テスト DM、実電話イベントと並行した一度だけの DM、モーダル返信のイベント保存、通話書き起こしの DM 逐次中継を実アカウントで検証済み。
+- 2026-09-26: MVP 0.1 として保全（タグ `mvp-0.1`、`reference/mvp0.1.md`）。電話/iBeacon は主経路として維持し、Discord 障害は非致命的な配送失敗として表示する。
 
 World ID / IDKit は延期機能ではなく、実通話前の発信認可として実装する。`world-id-idkit` Skill と Developer Portal MCP を使い、RP signing key は会話やログを経由させず Secret Manager へ直接保存する。
 
-### Phase 7: GATT 移行（ストレッチゴール、最優先度は最低。Beacon 完動・Discord・Full UI・P2・P3 が片付き、時間が余った場合のみ）
+### Phase 7: MVP 0.1 の次（提出までの主線、実行順）
+
+1a 章の実行順序の決定（2026-09-26、残り時間の目安 10 時間）に従う。
+
+1. アプリ内チャット風ライブ表示（`emergency_events/{id}/updates` を直接購読、新規スキーマなし、`doc/tasks.md` P1-16）。
+2. 英語化・B2C 向け UI 整形（専用フェーズを設けず、以後触る画面から段階的に。P1-17）。
+3. P2 最小書き込みパスの後に周辺情報蓄積（`ambient_observation`、P2-01/P2-02 → P2-07）。
+4. World ID 再認証・解除と Passport/Selfie 対応（P1-18 → P1-19）。
+
+### Phase X: GATT 移行（ストレッチゴール、最優先度は最低。Phase 7・P2・P3 が片付き、時間が余った場合のみ）
+
+タスクは `doc/tasks.md` の PX-06〜PX-13。
 
 - GATT 経路（6b 章）を追加し、`trigger_source: gatt` を Safety gate へ接続する。
 - `CONNECTED -> SUBSCRIBED -> READY` の接続維持、epoch/eventId によるイベント検証、ACK 処理を実装する。
