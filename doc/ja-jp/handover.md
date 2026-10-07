@@ -6,7 +6,7 @@
 
 ## 1. 現在地
 
-- **2026-10-07: Realtime の非同期ルーチン設計を切り出し**。当時の function calling → Cloud Run の Responses background ジョブ → 同じ `call_id` の `function_call_output` → 通話への音声回答、という未実装案を [doc/ja-jp/realtime-async-delegation.md](realtime-async-delegation.md) に整理。既存のメモ注入との違い、worker 基盤・再送境界の未確定点、`store: false` でも background 処理で一時保存される点を明示した。コード・デプロイ・PX-14〜PX-19 の未着手状態は変更していない。
+- **2026-10-07: 非同期検索ガイドを作成**。[doc/ja-jp/realtime-async-delegation.md](realtime-async-delegation.md) は当初の設計切り出しから、プロダクト名・固有スキーマを外した新規開発者向け OpenAI Realtime + Vertex AI Google Search grounding ガイドへ改稿。ユーザー判断で Google の必要な許諾は取得済み前提とし、検索結果を音声回答に戻す方法、GCP / IAM / ADC / Secret、Tasks worker と Firestore listener、別検索への adapter 差し替えを説明する。実装・実インフラ操作はなし。当時の Responses delegation 設計の正本は plan 8a 章に残し、PX-14〜PX-19 は未着手のまま。
 - **2026-09-27: APK 配布サイト公開済み**。URL: https://lifelink-56179519-0e8c-4306-abad-ef9019fcec0e-4qp2xid4rq-an.a.run.app 。`web/` を専用 Cloud Run（backend と別、権限なし SA、min=0/max=1）へ配置。APK は GitHub Releases の既存 URL。共有 URL は project ID/番号なしのハッシュ形式を使う（番号入り別名の存在は Cloud Run の仕様）。サービスを再作成せず同じ UUID 名へ更新。手順・証跡: `doc/ja-jp/web-distribution.md`。
 - MVP 主線（P0-01〜P0-21）は完了し、**タグ `mvp-0.1`** と `doc/ja-jp/mvp0.1.md` で保全済み。壊したらここへ戻る。
 - 動く縦断フロー: 物理ボタン（+Beacon）or 画面ボタン → Safety gate → Cloud Run → Twilio が登録先へ電話 → OpenAI Realtime の AI が都道府県とメモを話す → 同時に Discord Bot が同意済み友人へ DM → 通話の書き起こしを DM へ逐次中継 → 友人の返信が同じイベントに保存され通話中の AI に伝わる。
