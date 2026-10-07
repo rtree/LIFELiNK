@@ -815,6 +815,8 @@ BLE 層から電話 API や Firebase を直接呼ばない。Android Controller 
 
 ## 8a. 状況ストアと Responses delegation の詳細設計（GPT Live、設計を先に確定、実装は P2）
 
+**切り出し資料（2026-10-07）**: Realtime から非同期ルーチンを呼び、同じ通話へ結果を戻す予定だった仕組みは [doc/ja-jp/realtime-async-delegation.md](realtime-async-delegation.md) に整理した。本章はスキーマの正本として残す。実装は引き続き未着手（PX-14〜PX-19）で、切り出しは実装再開の決定ではない。
+
 主線（P0 の `emergency_events`/`updates` による単純なモデル）は変更しない。ここでは、情報量が増えた後も破綻しない状況管理の到達点を先に設計し、P0 実装が P2 で作り直しにならないようにする。
 
 ### なぜ Realtime の conversation だけを正本にしないか
